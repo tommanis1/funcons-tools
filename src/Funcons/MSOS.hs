@@ -725,15 +725,22 @@ premiseEval vapp fapp f = rewriteFuncons f >>= \case
     ValTerm vs      -> vapp vs
     CompTerm _ step -> buildStepCount (optRefocus (fapp step))
 
+premiseEvalMultiple :: ([Values] -> [Rewrite Rewritten]) -> (MSOS StepRes -> MSOS StepRes) ->
+                    Funcons -> [Rewrite Rewritten]
+premiseEvalMultiple vapp fapp f = rewriteFuncons f >>= \case
+    ValTerm vs      -> vapp vs
+    CompTerm _ step -> [buildStepCount (optRefocus (fapp step))]
+
+
 -- | Execute a computational step as a /premise/.
 -- The result of the step is the returned funcon term. 
-{- premiseStepApp :: (StepRes -> StepRes) -> Funcons -> MSOS StepRes
+premiseStepApp :: (StepRes -> StepRes) -> Funcons -> MSOS StepRes
 premiseStepApp app f = liftRewrite (rewriteFuncons f) >>= \case
     ValTerm vs      -> msos_throw (StepOnValue vs)
     CompTerm _ step -> app <$> (count_delegation >> optRefocus step)
- -}
-{- premiseStep :: Funcons -> MSOS StepRes
-premiseStep = premiseStepApp id -}
+
+premiseStep :: Funcons -> MSOS StepRes
+premiseStep = premiseStepApp id
 
 ----- main `step` function
 {- evalFuncons :: Funcons -> MSOS StepRes
@@ -894,7 +901,7 @@ rewriteStrictSequence fs = case rest of
 --     evalSequence (replicate (length args) Strict) args
 --         (cont . map downcastValue) cons
 
-evalSequence :: [Strictness] -> [Funcons] ->
+ evalSequence :: [Strictness] -> [Funcons] ->
     ([Funcons] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> [Rewrite Rewritten]
 evalSequence strns args cont cons = 
   do
@@ -905,25 +912,23 @@ evalSequence strns args cont cons =
           | otherwise        = do
             options <-  maybe_randomRemove NDInterleaving args_undone 
             result <- forM options $ \((i,(_,f)), args_undone') -> do
-              let todo_name = do
-                  count_rewrite
-                  evalSeqAux args_done' (map bump args_undone')
-                where args_done' = filter ((<i) . fst) args_done ++
-                                  zip [i..] ((zip (replicate (length vs) Strict)
-                                                    (map FValue vs))) ++
-                                  map bump (filter ((>i) . fst) args_done)
-                      bump (k,v) | k > i      = (k + length vs - 1, v)
-                                | otherwise  = (k,v)
-              return todo_name
-              -- r <- forM todo_name $ \(valueCont, vs) ->
-              --       let funconCont stepf = stepf >>= \case
-              --             Left f' -> stepTo (cons (remakeArgs args_done [f'] args_undone'))
-              --             Right vs' -> stepTo (cons (remakeArgs args_done (map FValue vs') args_undone'))
-              --           where remakeArgs m1 l1 m2 =  
-              --                   map (snd . snd) (sorter (filter ((<i) . fst) (m1++m2))) ++ l1 ++
-              --                   map (snd . snd) (sorter (filter ((>i) . fst) (m1++m2)))
-              --       premiseEval valueCont funconCont 
-    --           return r
+              let valueCont vs = do 
+                    count_rewrite 
+                    evalSeqAux args_done' (map bump args_undone')
+                    where args_done' = filter ((<i) . fst) args_done ++
+                                        zip [i..] ((zip (replicate (length vs) Strict) 
+                                                          (map FValue vs))) ++
+                                       map bump (filter ((>i) . fst) args_done)
+                          bump (k,v) | k > i      = (k + length vs - 1, v)
+                                     | otherwise  = (k,v)
+              let funconCont stepf = stepf >>= \case 
+                    Left f' -> stepTo (cons (remakeArgs args_done [f'] args_undone'))
+                    Right vs' -> stepTo (cons (remakeArgs args_done (map FValue vs') args_undone'))
+                   where remakeArgs m1 l1 m2 =  
+                          map (snd . snd) (sorter (filter ((<i) . fst) (m1++m2))) ++ l1 ++
+                          map (snd . snd) (sorter (filter ((>i) . fst) (m1++m2)))
+
+              concat [premiseEvalMultiple valueCont funconCont f]     
             result
     fmap uncurry $ evalSeqAux (partition (isDone . snd) args_map)
  where  isDone (NonStrict, _)     = True
@@ -931,6 +936,42 @@ evalSequence strns args cont cons =
         isDone (Strict,_)         = False
         sorter = sortBy (compare `on` fst)
 
+ 
+{- lambda args_undone' args_done i f = do
+      let valueCont vs = do 
+            count_rewrite 
+            evalSeqAux args_done' (map bump args_undone')
+            where args_done' = filter ((<i) . fst) args_done ++
+                                zip [i..] ((zip (replicate (length vs) Strict) 
+                                                  (map FValue vs))) ++
+                                map bump (filter ((>i) . fst) args_done)
+                  bump (k,v) | k > i      = (k + length vs - 1, v)
+                              | otherwise  = (k,v)
+      let funconCont stepf = stepf >>= \case 
+            Left f' -> stepTo (cons (remakeArgs args_done [f'] args_undone'))
+            Right vs' -> stepTo (cons (remakeArgs args_done (map FValue vs') args_undone'))
+            where remakeArgs m1 l1 m2 = map (snd . snd) (sorter (filter ((<i) . fst) (m1++m2))) ++ l1 ++ map (snd . snd) (sorter (filter ((>i) . fst) (m1++m2)))
+
+      premiseEval valueCont funconCont f
+
+evalSequence :: [Strictness] -> [Funcons] -> 
+    ([Funcons] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> Rewrite Rewritten
+evalSequence strns args cont cons = do
+    let args_map = zip [1..] (zip strns args)
+
+    let evalSeqAux args_done args_undone 
+          | null args_undone = cont (map (snd . snd) (sorter args_done))
+          | otherwise        = do
+              r <- 
+                maybe_randomRemove NDInterleaving args_undone
+              let ((i,(_,f)), args_undone') = head r
+              lambda args_done i f
+              premiseEval valueCont funconCont f          
+    uncurry evalSeqAux (partition (isDone . snd) args_map)
+ where  isDone (NonStrict, _)     = True
+        isDone (Strict, FValue _) = True
+        isDone (Strict,_)         = False
+        sorter = sortBy (compare `on` fst) -}
 
 -- | Yield an 'MSOS' computation as a fully rewritten term.
 -- This function must be used in order to access entities in the definition
