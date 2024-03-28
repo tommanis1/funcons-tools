@@ -82,12 +82,12 @@ fromNullaryValOp :: ([Funcons] -> Funcons) -> ([OpExpr Funcons] -> OpExpr Funcon
 fromNullaryValOp cons mkExpr = NullaryFuncon op
   where op = report (cons []) False (VAL.eval (mkExpr []))
 
-report :: Funcons -> Bool -> EvalResult Funcons -> Rewrite Rewritten 
+report :: Funcons -> Bool -> EvalResult Funcons -> [Rewrite Rewritten] 
 report f seqRes res = case res of
-  Error _ dres                -> reportResult dres
-  Success (FValue (ADTVal "null" _)) -> rewrittens []
-  Success (FValue v)          -> rewritten' v
-  Success t                   -> rewriteFuncons t
+  Error _ dres                -> [reportResult dres]
+  Success (FValue (ADTVal "null" _)) -> [rewrittens []]
+  Success (FValue v)          -> [rewritten' v]
+  Success t                   -> [rewriteFuncons t]
   EvalResults ress            -> maybe_randomSelect NDValueOperations ress >>= 
                                   report f seqRes 
   where rewritten' v | seqRes, ValSeq fs <- v, 
@@ -349,10 +349,10 @@ type Mutable      = M.Map Name [Values]
 
 stepRules = stepARules NoMoreBranches count_backtrack_in
 
-stepARules :: ([IException] -> IE) -> Rewrite () -> [IException] -> [MSOS StepRes] -> MSOS StepRes
+stepARules :: ([IException] -> IE) -> Rewrite () -> [IException] -> [MSOS StepRes] -> [MSOS StepRes]
 stepARules fexc _ errs [] = msos_throw (fexc errs)
 stepARules fexc counter errs ts = 
- liftRewrite (maybe_randomRemove NDRuleSelection ts) >>= 
+ [liftRewrite option >>= 
   \(t1,ts) -> MSOS $ \ctxt mut -> do 
     (e_ie_a, mut', wr) <- runMSOS t1 ctxt mut 
     case e_ie_a of
@@ -361,7 +361,7 @@ stepARules fexc counter errs ts =
                                     liftRewrite counter
                                     addToCounter (counters (ewriter wr))
                                     stepARules fexc counter (errs++[ie]) ts) ctxt mut
-        _                      -> return (e_ie_a, mut', wr)
+        _                      -> return (e_ie_a, mut', wr)  | option <- maybe_randomRemove NDRuleSelection ts]
 
 -- | Function 'evalRules' implements a backtracking procedure.
 -- It receives two lists of alternatives as arguments, the first
@@ -420,17 +420,34 @@ modifyRewriteReader :: (RewriteReader -> RewriteReader) -> MSOS a -> MSOS a
 modifyRewriteReader mod (MSOS f) = MSOS (f . mod')
   where mod' ctxt = ctxt { ereader = mod (ereader ctxt) }
 
-maybe_randomRemove :: SourceOfND -> [a] -> Rewrite (a, [a])
+{- maybe_randomRemove :: SourceOfND -> [a] -> Rewrite (a, [a])
+maybe_randomRemove _ [] = randomRemove []
+maybe_randomRemove src xs@(x:xs') = do
+   opts <- giveOpts
+  if src `elem` get_nd_sources opts then randomRemove xs
+                                      else return (x, xs') -}
+
+-- TODO rename enum_* 
+maybe_randomRemove :: SourceOfND -> [a] -> [Rewrite (a, [a])]
 maybe_randomRemove _ [] = randomRemove []
 maybe_randomRemove src xs@(x:xs') = do
   opts <- giveOpts
   if src `elem` get_nd_sources opts then randomRemove xs
-                                    else return (x, xs')
+                                    else [return (x, xs')]
+
 
 -- | Uses the random number generator of Rewrite to randomly select
 -- an element of a given list. The element is returned, together
 -- with the list from which the element has been removed
 -- Raises an internal exception if given an empty list
+randomRemove :: [a] -> [Rewrite (a, [a])]
+randomRemove [] = [internal "randomRemove: empty list"]
+randomRemove [x]= [return (x, [])]
+randomRemove xs =  [Rewrite $ \_ mut -> (Right (elem i, rest i), mut, mempty ) | i <- [0 .. length xs - 1]]
+  where 
+    elem i = xs !! i
+    rest i = take i xs ++ drop (i + 1) xs 
+{- 
 randomRemove :: [a] -> Rewrite (a, [a])
 randomRemove [] = internal "randomRemove: empty list"
 randomRemove [x]= return (x, [])
@@ -440,10 +457,16 @@ randomRemove xs = Rewrite $ \_ mut ->
       index     = i `mod` (length xs)
       elem      = xs !! index 
       rest      = take index xs ++ drop (index + 1) xs 
-  in (Right (elem, rest), mut {random_gen = gen'}, mempty )
+  in (Right (elem, rest), mut {random_gen = gen'}, mempty ) -}
 
-maybe_randomSelect src xs = fst <$> maybe_randomRemove src xs
-randomSelect xs = fst <$> randomRemove xs
+maybe_randomSelect :: SourceOfND ->  [a] -> [a]
+maybe_randomSelect src xs = [fst <$> option | option <- maybe_randomRemove src xs]
+
+randomSelect :: [a] -> [a]
+randomSelect xs = [fst <$> option | option <-randomRemove xs]
+
+{- maybe_randomSelect src xs = fst <$> maybe_randomRemove src xs
+randomSelect xs = fst <$> randomRemove xs -}
 
 {-
 randomSelect :: [a] -> Rewrite a
