@@ -1,5 +1,5 @@
 {-# LANGUAGE LambdaCase, OverloadedStrings, Rank2Types, TupleSections   
-             , FlexibleInstances #-}
+             , FlexibleInstances  #-}
 
 module Funcons.MSOS (
     -- * Making steps
@@ -180,14 +180,14 @@ libOverrides = M.unions . reverse
 libFromList :: [(Name, EvalFunction)] -> FunconLibrary
 libFromList = M.fromList
 
--- lookupFuncon :: Name -> Rewrite EvalFunction
--- lookupFuncon key = Rewrite $ \ctxt st ->
---     (case M.lookup key (funconlib ctxt) of
---         Just f -> Right f
---         _ -> case M.lookup key (builtin_funcons (run_opts ctxt)) of
---                Just f -> Right (NullaryFuncon (rewriteTo f))
---                _ -> Left (evalctxt2exception (Internal ("unknown funcon: "++ unpack key)) ctxt)
---     , st, mempty)
+lookupFuncon :: Name -> Rewrite EvalFunction
+lookupFuncon key = Rewrite $ \ctxt st ->
+    (case M.lookup key (funconlib ctxt) of
+        Just f -> Right f
+        _ -> case M.lookup key (builtin_funcons (run_opts ctxt)) of
+               Just f -> Right (NullaryFuncon (rewriteTo f))
+               _ -> Left (evalctxt2exception (Internal ("unknown funcon: "++ unpack key)) ctxt)
+    , st, mempty)
 
 ---------------------------------------------------------------------------
 data RewriteReader = RewriteReader
@@ -429,11 +429,11 @@ maybe_randomRemove src xs@(x:xs') = do
                                       else return (x, xs') -}
 
 -- TODO rename enum_* 
-maybe_randomRemove :: SourceOfND -> [a] ->  Rewrite [(a, [a])]
-maybe_randomRemove _ [] = randomRemove []
+maybe_randomRemove :: SourceOfND -> [a] -> Rewrite [(a, [a])]
+-- maybe_randomRemove _ [] = randomRemove []
 maybe_randomRemove src xs@(x:xs') = do
   opts <- giveOpts
-  if src `elem` get_nd_sources opts then randomRemove xs
+  if src `elem` get_nd_sources opts then Rewrite $ \_ mut -> (Right (randomRemove xs), mut, mempty )
                                     else return [ (x, xs')]
                                     
 
@@ -449,12 +449,10 @@ randomRemove xs =  Rewrite $ \_ mut -> [(Right (elem i, rest i), mut, mempty ) |
   where
     elem i = xs !! i
     rest i = take i xs ++ drop (i + 1) xs -}
-randomRemove :: [a] -> Rewrite [(a, [a])]
-randomRemove [] = internal [ "randomRemove: empty list"]
-randomRemove [x] = return [(x, [])]
-randomRemove xs = Rewrite $ \_ mut -> 
-  let results = [(elem i, rest i) | i <- [0 .. length xs - 1]]
-  in (Right results, mut, mempty)
+randomRemove :: [a] ->  [ (a, [a])]
+-- randomRemove [] = return [ internal"randomRemove: empty list"]
+randomRemove [x] =  [ (x, [])]
+randomRemove xs = [(elem i, rest i)| i <- [0 .. length xs - 1]]
   where
     elem i = xs !! i
     rest i = take i xs ++ drop (i + 1) xs
@@ -626,22 +624,24 @@ buildStepCount = buildStepCounter count_delegation
 buildStepCounter :: MSOS () -> MSOS StepRes -> Rewrite Rewritten
 buildStepCounter counter mf = compstep (counter >> mf)
 
-{- optRefocus :: MSOS StepRes -> MSOS StepRes
+optRefocus :: MSOS StepRes -> MSOS StepRes
 optRefocus stepper = doRefocus >>= \case
                         True    -> refocus stepper
-                        False   -> stepper -}
+                        False   -> stepper
 
-{- refocus :: MSOS StepRes -> MSOS StepRes
+
+refocus :: MSOS StepRes -> MSOS StepRes
 refocus stepper -- stop refocussing when a signal has been raised
                 = count_refocus >> if_violates_refocus stepper return continue
     where continue = \case
             Right vs  -> return (Right vs)
             Left f    ->
-              liftRewrite (rewriteFuncons f) >>= \case
+              -- TODO random instead of head
+              liftRewrite (head $ rewriteFuncons f) >>= \case
                 ValTerm [v] -> return (Right [v])
                 ValTerm vs  -> return (Left f) -- undo rewrites and accept last step
                 res         -> refocus $ stepRewritten res
- -}
+
 stepRewritten :: Rewritten -> MSOS StepRes
 stepRewritten (ValTerm vs) = return (Right vs)
 stepRewritten (CompTerm f step) = modifyRewriteReader mod (count_step >> step)
@@ -654,12 +654,13 @@ rewritten = return . ValTerm . (:[])
 rewrittens :: [Values] -> Rewrite Rewritten
 rewrittens = return . ValTerm
 
-{- -- | Yield a funcon term as the result of a syntactic rewrite.
+-- | Yield a funcon term as the result of a syntactic rewrite.
 -- This function must be used instead of @return@.
 -- The given term is fully rewritten.
 rewriteTo :: Funcons -> Rewrite Rewritten -- only rewrites, no possible signal
-rewriteTo f = count_rewrite >> rewriteFuncons f
- -}
+--  TODO head? 
+rewriteTo f = count_rewrite >> (head (rewriteFuncons f))
+
 -- | Yield a sequence of funcon terms as the result of a rewrite.
 -- This is only valid when all terms rewrite to a value
 rewriteSeqTo :: [Funcons] -> Rewrite Rewritten
@@ -675,7 +676,7 @@ stepTo = return . Left
 stepSeqTo :: [Funcons] -> MSOS StepRes
 stepSeqTo fs = Right <$> liftRewrite (rewriteStrictSequence fs)
 
-{- if_abruptly_terminates :: Bool -> MSOS StepRes -> (StepRes -> MSOS StepRes)
+if_abruptly_terminates :: Bool -> MSOS StepRes -> (StepRes -> MSOS StepRes)
                             -> (StepRes -> MSOS StepRes) -> MSOS StepRes
 if_abruptly_terminates care (MSOS fstep) abr no_abr = MSOS $ \ctxt mut ->
     fstep ctxt mut >>= \case
@@ -685,9 +686,9 @@ if_abruptly_terminates care (MSOS fstep) abr no_abr = MSOS $ \ctxt mut ->
                            | otherwise      = no_abr f'
             in do (e_f'', mut'', wr'') <- fstep ctxt mut'
                   return (e_f'', mut'', wr' <> wr'')
-        norule_res -> return norule_res -}
+        norule_res -> return norule_res
 
-{- -- TODO is input test accurate? 
+-- TODO is input test accurate? 
 -- TODO We should also find changes to mutable entities
 if_violates_refocus :: MSOS StepRes -> (StepRes -> MSOS StepRes)
                             -> (StepRes -> MSOS StepRes) -> MSOS StepRes
@@ -702,7 +703,7 @@ if_violates_refocus (MSOS fstep) viol no_viol = MSOS $ \ctxt mut ->
                            | otherwise   = no_viol f'
             in do (e_f'', mut'', wr'') <- fstep ctxt mut'
                   return (e_f'', mut'', wr' <> wr'')
-        norule_res -> return norule_res -}
+        norule_res -> return norule_res
 
 -- | Execute a premise as either a rewrite or a step.
 -- Depending on whether only rewrites are necessary to yield a value,
@@ -720,15 +721,18 @@ if_violates_refocus (MSOS fstep) viol no_viol = MSOS $ \ctxt mut ->
 --              stepTo (scope_ [FValue e1, x'])
 -- @
 premiseEval :: ([Values] -> Rewrite Rewritten) -> (MSOS StepRes -> MSOS StepRes) ->
-                    Funcons -> Rewrite Rewritten
+                    Funcons -> [Rewrite Rewritten]
+                    -- TODO
 premiseEval vapp fapp f = rewriteFuncons f >>= \case
     ValTerm vs      -> vapp vs
     CompTerm _ step -> buildStepCount (optRefocus (fapp step))
 
-premiseEvalMultiple :: ([Values] -> [Rewrite Rewritten]) -> (MSOS StepRes -> MSOS StepRes) ->
+premiseEvalMultiple :: ([Values] -> Rewrite [Rewrite Rewritten]) -> (MSOS StepRes -> MSOS StepRes) ->
                     Funcons -> [Rewrite Rewritten]
 premiseEvalMultiple vapp fapp f = rewriteFuncons f >>= \case
-    ValTerm vs      -> vapp vs
+    ValTerm vs      -> do 
+      ret <- vapp vs
+      ret
     CompTerm _ step -> [buildStepCount (optRefocus (fapp step))]
 
 
@@ -743,10 +747,10 @@ premiseStep :: Funcons -> MSOS StepRes
 premiseStep = premiseStepApp id
 
 ----- main `step` function
-{- evalFuncons :: Funcons -> MSOS StepRes
+evalFuncons :: Funcons -> MSOS StepRes
 evalFuncons f = liftRewrite (rewriteFuncons f) >>= stepRewritten
- -}
-{- rewritesToType :: Funcons -> Rewrite Types
+
+rewritesToType :: Funcons -> Rewrite Types
 rewritesToType f = do
   rewriteFunconsWcount f >>= \case
     ValTerm [v@(ComputationType _)] -> return (downcastValueType v)
@@ -762,179 +766,208 @@ rewritesToValues :: Funcons -> Rewrite [Values]
 rewritesToValues f = do
   rewriteFunconsWcount f >>= \case
     ValTerm vs  -> return vs
-    _           -> rewriteToValErr -}
+    _           -> rewriteToValErr
 
-{- rewriteToValErr = rewrite_throw $
+rewriteToValErr = rewrite_throw $
   SideCondFail "side-condition/entity-value/annotation evaluation requires step"
- -}
-{- rewriteFunconsWcount :: Funcons -> Rewrite Rewritten
+
+rewriteFunconsWcount :: Funcons -> [Rewrite Rewritten]
 rewriteFunconsWcount f = count_rewrite_attempt >> rewriteFuncons f
- -}
-{- rewriteFuncons :: Funcons -> Rewrite Rewritten
-rewriteFuncons f = modifyRewriteCTXT (\ctxt -> ctxt{local_fct = f}) (rewriteFuncons' f)
+
+selectRandom :: StdGen -> [a] -> (a, StdGen)
+selectRandom gen xs = let (index, newGen) = randomR (0, length xs - 1) gen
+                      in (xs !! index, newGen)
+
+rewriteFunconsRandomUniverse :: Funcons -> Rewrite (Rewrite Rewritten)
+rewriteFunconsRandomUniverse f = Rewrite $ \ctxt st ->
+    let rewrites = rewriteFuncons f
+        (selectedRewrite, newGen) = selectRandom (random_gen st) rewrites
+        (e_a, st', cs) = runRewrite selectedRewrite ctxt st
+    in (e_a, st' {random_gen = newGen}, cs)
+
+
+ rewriteFuncons :: Funcons -> [Rewrite Rewritten]
+rewriteFuncons f = fmap (modifyRewriteCTXT (\ctxt -> ctxt{local_fct = f})) $ (rewriteFuncons' f)
  where
-    rewriteFuncons' (FValue v)   = return (ValTerm [v])
-{-    rewriteFuncons' (FTuple fs)  = 
+    rewriteFuncons' (FValue v)   = [return (ValTerm [v])]
+{-     rewriteFuncons' (FTuple fs)  = 
       let fmops = tupleTypeTemplate fs 
       in if any (isJust . snd) fmops
           -- sequence contains a sequence-operator, thus is a sequence of sorts  
           then rewritten . typeVal =<< evalTupleType fmops
           -- regular sequence 
           else evalStrictSequence fs (rewritten . safe_tuple_val) FTuple
--}
+ -}
 --    rewriteFuncons' (FList fs)   = evalStrictSequence fs (rewritten . List) FList
     rewriteFuncons' (FSet fs)    = evalStrictSequence fs (rewritten . setval_) FSet
     rewriteFuncons' (FMap fs)    = evalStrictSequence fs (rewritten . mapval_) FMap
     rewriteFuncons' f@(FBinding fk fv) = evalStrictSequence (fk:fv) (rewritten . tuple) mkBinding
       where mkBinding (k:fvs) = FBinding k fvs
             mkBinding _       = error "invalid binding-notation"
-    rewriteFuncons' f@(FSortPower s1 fn) = case (s1,fn) of
-      (FValue mty@(ComputationType _), FValue v)
-        | Nat n <- upcastNaturals v ->
-                  rewrittens (replicate (fromInteger n) (ComputationType (Type (downcastValueType mty))))
-      (FValue mty, _) -> rewriteFuncons fn >>= \case
-            ValTerm [v] -> rewriteFuncons $ FSortPower s1 (FValue v)
-            ValTerm _   -> sortErr f "second operand of ^ cannot compute a sequence"
-            CompTerm _ mf -> flattenApplyWithExc ie (FSortPower s1) mf
-                where ie = SortErr "^_ multiadic argument"
-      _ -> rewriteFuncons s1 >>= \case
-            ValTerm [v] -> rewriteFuncons $ FSortPower (FValue v) fn
-            ValTerm _   -> sortErr f "first operand of ^ cannot compute a sequence"
-            CompTerm _ mf -> flattenApplyWithExc ie (flip FSortPower fn) mf
-              where ie = SortErr "_^ multiadic argument"
-    rewriteFuncons' f@(FSortSeq s1 op)     = case s1 of
-      (FValue (ComputationType (Type ty))) -> rewritten $ ComputationType $ Type $ AnnotatedType ty op
-      (FValue _) -> sortErr (FSortSeq s1 op) "sort-sequence operator not on type"
-      _ -> rewriteFuncons s1 >>= \case
-            ValTerm [v1] -> rewriteFuncons $ FSortSeq (FValue v1) op
-            ValTerm vs   -> sortErr (FSortSeq s1 op) "operand of sort-sequence operator cannot compute a sequence"
-            CompTerm _ mf -> flattenApplyWithExc ie (flip FSortSeq op) mf
-              where ie = SortErr "sort-sequence operator, multiadic argument"
-    rewriteFuncons' (FSortComputes f1) = case f1 of
-        (FValue (ComputationType (Type ty))) -> rewritten $ ComputationType $ ComputesType ty
-        (FValue _) -> sortErr (FSortComputes f1) "=> not applied to a type"
-        _ -> rewriteFuncons f1 >>= \case
-                ValTerm [v1] -> rewriteFuncons $ FSortComputes (FValue v1)
-                ValTerm vs   -> sortErr (FSortComputes f1) "operand of => cannot compute a sequence"
-                CompTerm _ mf    -> flattenApplyWithExc ie FSortComputes mf
-                  where ie = SortErr "=>_ multiadic argument"
-    rewriteFuncons' (FSortComputesFrom f1 f2) = case (f1,f2) of
-        (FValue (ComputationType (Type ty1)),FValue (ComputationType (Type ty2)))
-            -> rewritten $ ComputationType (ComputesFromType ty1 ty2)
-        (FValue _, FValue _) -> sortErr (FSortComputesFrom f1 f2) "=> not applied to types"
-        (FValue (ComputationType (Type ty1)),_)
-            -> rewriteFuncons f2 >>= \case
-                ValTerm [v2] -> rewriteFuncons $ FSortComputesFrom f1 (FValue v2)
-                ValTerm _ -> sortErr (FSortComputesFrom f1 f2) "second operand of => cannot compute a sequence"
-                CompTerm _ mf    -> flattenApplyWithExc ie (FSortComputesFrom f1) mf
-                  where ie = SortErr "_=>_ multiadic operand (2)"
-        (_,_)
-            -> rewriteFuncons f1 >>= \case
-                ValTerm [v1] -> rewriteFuncons $ FSortComputesFrom (FValue v1) f2
-                ValTerm _ -> sortErr (FSortComputesFrom f1 f2) "_=>_ multiadic operand (1)"
-                CompTerm _ mf    -> flattenApplyWithExc ie (flip FSortComputesFrom f2) mf
-                  where ie = SortErr "_=>_ multiadic operand (1)"
-    rewriteFuncons' (FSortUnion s1 s2)   = case (s1, s2) of
-        (FValue (ComputationType (Type t1))
-            , FValue (ComputationType (Type t2))) -> rewritten $ typeVal $ Union t1 t2
-        (FValue _, FValue _) -> sortErr (FSortUnion s1 s2) "sort-union not applied to two sorts"
-        (FValue v1, _) -> rewriteFuncons s2 >>= \case
-            ValTerm [v2] -> rewriteFuncons $ FSortUnion s1 (FValue v2)
-            ValTerm _ -> sortErr (FSortUnion s1 s2) "sort-union multiadic argument (2)"
-            CompTerm _ mf -> flattenApplyWithExc ie (FSortUnion s1) mf
-              where ie = SortErr "sort-union multiadic argument (2)"
-        _ -> rewriteFuncons s1 >>= \case
-                ValTerm [v] -> rewriteFuncons $ FSortUnion (FValue v) s2
-                ValTerm _ -> sortErr (FSortUnion s1 s2) "sort-union multiadic argument (1)"
-                CompTerm _ mf   -> flattenApplyWithExc ie (flip FSortUnion s2) mf
-                  where ie = SortErr "sort-union multiadic argument (1)"
-    rewriteFuncons' (FSortInter s1 s2)   = case (s1, s2) of
-        (FValue (ComputationType (Type t1))
-            , FValue (ComputationType (Type t2))) -> rewritten $ typeVal $ Intersection t1 t2
-        (FValue _, FValue _) -> sortErr (FSortInter s1 s2) "sort-intersection not applied to two sorts"
-        (FValue v1, _) -> rewriteFuncons s2 >>= \case
-            ValTerm [v2] -> rewriteFuncons $ FSortInter s1 (FValue v2)
-            ValTerm _ -> sortErr (FSortInter s1 s2) "sort-intersection multiadic argument (2)"
-            CompTerm _ mf -> flattenApplyWithExc ie (FSortInter s1) mf
-              where ie = SortErr "sort-intersection multiadic argument (2)"
-        _ -> do rewriteFuncons s1 >>= \case
-                    ValTerm [v1] -> rewriteFuncons $ FSortInter (FValue v1) s2
-                    ValTerm _ -> sortErr (FSortInter s1 s2) "sort-intersection multiadic argument (1)"
-                    CompTerm _ mf   -> flattenApplyWithExc ie (flip FSortInter s2) mf
-                      where ie = SortErr "sort-intersection multiadic argument (1)"
-    rewriteFuncons' (FSortComplement s1) = case s1 of
-      FValue (ComputationType (Type t1)) -> rewritten $ typeVal $ Complement t1
-      FValue _ -> sortErr (FSortComplement s1) "sort-complement not applied to a sort"
-      _ -> do rewriteFuncons s1 >>= \case
-                ValTerm [v] -> rewriteFuncons $ FSortComplement (FValue v)
-                ValTerm vs -> sortErr (FSortComplement s1) "sort-complement multiadic argument"
-                CompTerm _ mf -> flattenApplyWithExc ie FSortComplement mf
-                  where ie = SortErr "sort-complement multiadic argument"
-    rewriteFuncons' (FName nm) =
-        do  mystepf <- lookupFuncon nm
-            case mystepf of
-                NullaryFuncon mystep -> mystep
-                StrictFuncon _ -> rewriteFuncons' (FApp nm [])
-                ValueOp _ -> rewriteFuncons' (FApp nm [])
-                _ -> error ("funcon " ++ unpack nm ++ " not applied to any arguments")
+    -- rewriteFuncons' f@(FSortPower s1 fn) = case (s1,fn) of
+    --   (FValue mty@(ComputationType _), FValue v)
+    --     | Nat n <- upcastNaturals v ->
+    --               rewrittens (replicate (fromInteger n) (ComputationType (Type (downcastValueType mty))))
+    --   (FValue mty, _) -> rewriteFuncons fn >>= \case
+    --         ValTerm [v] -> rewriteFuncons $ FSortPower s1 (FValue v)
+    --         ValTerm _   -> sortErr f "second operand of ^ cannot compute a sequence"
+    --         CompTerm _ mf -> flattenApplyWithExc ie (FSortPower s1) mf
+    --             where ie = SortErr "^_ multiadic argument"
+    --   _ -> rewriteFuncons s1 >>= \case
+    --         ValTerm [v] -> rewriteFuncons $ FSortPower (FValue v) fn
+    --         ValTerm _   -> sortErr f "first operand of ^ cannot compute a sequence"
+    --         CompTerm _ mf -> flattenApplyWithExc ie (flip FSortPower fn) mf
+    --           where ie = SortErr "_^ multiadic argument"
+    -- rewriteFuncons' f@(FSortSeq s1 op)     = case s1 of
+    --   (FValue (ComputationType (Type ty))) -> rewritten $ ComputationType $ Type $ AnnotatedType ty op
+    --   (FValue _) -> sortErr (FSortSeq s1 op) "sort-sequence operator not on type"
+    --   _ -> rewriteFuncons s1 >>= \case
+    --         ValTerm [v1] -> rewriteFuncons $ FSortSeq (FValue v1) op
+    --         ValTerm vs   -> sortErr (FSortSeq s1 op) "operand of sort-sequence operator cannot compute a sequence"
+    --         CompTerm _ mf -> flattenApplyWithExc ie (flip FSortSeq op) mf
+    --           where ie = SortErr "sort-sequence operator, multiadic argument"
+    -- rewriteFuncons' (FSortComputes f1) = case f1 of
+    --     (FValue (ComputationType (Type ty))) -> rewritten $ ComputationType $ ComputesType ty
+    --     (FValue _) -> sortErr (FSortComputes f1) "=> not applied to a type"
+    --     _ -> rewriteFuncons f1 >>= \case
+    --             ValTerm [v1] -> rewriteFuncons $ FSortComputes (FValue v1)
+    --             ValTerm vs   -> sortErr (FSortComputes f1) "operand of => cannot compute a sequence"
+    --             CompTerm _ mf    -> flattenApplyWithExc ie FSortComputes mf
+    --               where ie = SortErr "=>_ multiadic argument"
+    -- rewriteFuncons' (FSortComputesFrom f1 f2) = case (f1,f2) of
+    --     (FValue (ComputationType (Type ty1)),FValue (ComputationType (Type ty2)))
+    --         -> rewritten $ ComputationType (ComputesFromType ty1 ty2)
+    --     (FValue _, FValue _) -> sortErr (FSortComputesFrom f1 f2) "=> not applied to types"
+    --     (FValue (ComputationType (Type ty1)),_)
+    --         -> rewriteFuncons f2 >>= \case
+    --             ValTerm [v2] -> rewriteFuncons $ FSortComputesFrom f1 (FValue v2)
+    --             ValTerm _ -> sortErr (FSortComputesFrom f1 f2) "second operand of => cannot compute a sequence"
+    --             CompTerm _ mf    -> flattenApplyWithExc ie (FSortComputesFrom f1) mf
+    --               where ie = SortErr "_=>_ multiadic operand (2)"
+    --     (_,_)
+    --         -> rewriteFuncons f1 >>= \case
+    --             ValTerm [v1] -> rewriteFuncons $ FSortComputesFrom (FValue v1) f2
+    --             ValTerm _ -> sortErr (FSortComputesFrom f1 f2) "_=>_ multiadic operand (1)"
+    --             CompTerm _ mf    -> flattenApplyWithExc ie (flip FSortComputesFrom f2) mf
+    --               where ie = SortErr "_=>_ multiadic operand (1)"
+    -- rewriteFuncons' (FSortUnion s1 s2)   = case (s1, s2) of
+    --     (FValue (ComputationType (Type t1))
+    --         , FValue (ComputationType (Type t2))) -> rewritten $ typeVal $ Union t1 t2
+    --     (FValue _, FValue _) -> sortErr (FSortUnion s1 s2) "sort-union not applied to two sorts"
+    --     (FValue v1, _) -> rewriteFuncons s2 >>= \case
+    --         ValTerm [v2] -> rewriteFuncons $ FSortUnion s1 (FValue v2)
+    --         ValTerm _ -> sortErr (FSortUnion s1 s2) "sort-union multiadic argument (2)"
+    --         CompTerm _ mf -> flattenApplyWithExc ie (FSortUnion s1) mf
+    --           where ie = SortErr "sort-union multiadic argument (2)"
+    --     _ -> rewriteFuncons s1 >>= \case
+    --             ValTerm [v] -> rewriteFuncons $ FSortUnion (FValue v) s2
+    --             ValTerm _ -> sortErr (FSortUnion s1 s2) "sort-union multiadic argument (1)"
+    --             CompTerm _ mf   -> flattenApplyWithExc ie (flip FSortUnion s2) mf
+    --               where ie = SortErr "sort-union multiadic argument (1)"
+    -- rewriteFuncons' (FSortInter s1 s2)   = case (s1, s2) of
+    --     (FValue (ComputationType (Type t1))
+    --         , FValue (ComputationType (Type t2))) -> [rewritten $ typeVal $ Intersection t1 t2]
+    --     (FValue _, FValue _) -> [sortErr (FSortInter s1 s2) "sort-intersection not applied to two sorts"]
+    --     (FValue v1, _) -> rewriteFuncons s2 >>= \case
+    --         ValTerm [v2] -> rewriteFuncons $ FSortInter s1 (FValue v2)
+    --         ValTerm _ -> sortErr (FSortInter s1 s2) "sort-intersection multiadic argument (2)"
+    --         CompTerm _ mf -> flattenApplyWithExc ie (FSortInter s1) mf
+    --           where ie = SortErr "sort-intersection multiadic argument (2)"
+    --     _ -> do rewriteFuncons s1 >>= \case
+    --                 ValTerm [v1] -> rewriteFuncons $ FSortInter (FValue v1) s2
+    --                 ValTerm _ -> [sortErr (FSortInter s1 s2) "sort-intersection multiadic argument (1)"]
+    --                 CompTerm _ mf   -> [flattenApplyWithExc ie (flip FSortInter s2) mf]
+    --                   where ie = [SortErr "sort-intersection multiadic argument (1)"]
+    -- rewriteFuncons' (FSortComplement s1) = case s1 of
+    --   FValue (ComputationType (Type t1)) -> [rewritten $ typeVal $ Complement t1]
+    --   FValue _ -> sortErr (FSortComplement s1) "sort-complement not applied to a sort"
+    --   _ -> do rewriteFuncons s1 >>= \case
+    --             ValTerm [v] -> rewriteFuncons $ FSortComplement (FValue v)
+    --             ValTerm vs -> [sortErr (FSortComplement s1) "sort-complement multiadic argument"]
+    --             CompTerm _ mf -> [flattenApplyWithExc ie FSortComplement mf]
+    --               where ie = SortErr "sort-complement multiadic argument"
+    -- rewriteFuncons' (FName nm) =
+    --     do  mystepf <- lookupFuncon nm
+    --         case mystepf of
+    --             NullaryFuncon mystep -> [mystep]
+    --             StrictFuncon _ -> rewriteFuncons' (FApp nm [])
+    --             ValueOp _ -> rewriteFuncons' (FApp nm [])
+    --             _ -> [error ("funcon " ++ unpack nm ++ " not applied to any arguments")]
     rewriteFuncons' (FApp nm arg)    =
         do  mystepf <- lookupFuncon nm
             case mystepf of
-                NullaryFuncon _     -> exception (FApp nm arg) ("nullary funcon " ++ unpack nm ++ " applied to arguments: " ++ (showFunconsSeq arg))
+                NullaryFuncon _     -> [exception (FApp nm arg) ("nullary funcon " ++ unpack nm ++ " applied to arguments: " ++ (showFunconsSeq arg))]
                 ValueOp mystep      -> evalStrictSequence arg mystep (applyFuncon nm)
                 StrictFuncon mystep -> evalStrictSequence arg mystep (applyFuncon nm)
-                NonStrictFuncon mystep -> mystep arg
+                NonStrictFuncon mystep -> [mystep arg]
                 PartiallyStrictFuncon strns strn mystep ->
-                  evalSequence (strns ++ repeat strn) arg mystep (applyFuncon nm) -}
+                  evalSequence (strns ++ repeat strn) arg mystep (applyFuncon nm) 
 
-{- rewriteStrictSequence :: [Funcons] -> Rewrite [Values]
+rewriteStrictSequence :: [Funcons] -> Rewrite [Values]
 rewriteStrictSequence fs = case rest of
   []      -> return (map downcastValue vs)
   (x:xs)  -> rewriteFuncons x >>= \case
     ValTerm vs'    -> rewriteStrictSequence (vs++map FValue vs'++xs)
     CompTerm f0 mf -> internal ("step on sequence of computations: " ++ show fs)
   where (vs, rest) = span (not . hasStep) fs
- -}
+
 -- --OPT: replace by specialised variant of evalSequence
--- evalStrictSequence :: [Funcons] -> ([Values] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> Rewrite Rewritten
--- evalStrictSequence args cont cons =
---     evalSequence (replicate (length args) Strict) args
---         (cont . map downcastValue) cons
+evalStrictSequence :: [Funcons] -> ([Values] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> Rewrite [Rewrite Rewritten]
+evalStrictSequence args cont cons =
+    evalSequence (replicate (length args) Strict) args
+        (cont . map downcastValue) cons
 
- evalSequence :: [Strictness] -> [Funcons] ->
-    ([Funcons] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> [Rewrite Rewritten]
-evalSequence strns args cont cons = 
-  do
-    let args_map = zip [1..] (zip strns args)
-
-    let evalSeqAux args_done args_undone
-          | null args_undone = return [cont (map (snd . snd) (sorter args_done))]
-          | otherwise        = do
-            options <-  maybe_randomRemove NDInterleaving args_undone 
-            result <- forM options $ \((i,(_,f)), args_undone') -> do
-              let valueCont vs = do 
-                    count_rewrite 
-                    evalSeqAux args_done' (map bump args_undone')
+valueCont :: ([Funcons] -> Rewrite Rewritten)
+          -> ([Funcons] -> Funcons)  -> [(Int, (Strictness, Funcons))] -> [(Int, (Strictness, Funcons))]-> Int -> [Values] -> Rewrite [Rewrite Rewritten]
+valueCont cont cons args_undone' args_done i vs = 
+                    -- fmap count_rewrite 
+                    (evalSeqAux cont cons args_done' (map bump args_undone'))
                     where args_done' = filter ((<i) . fst) args_done ++
                                         zip [i..] ((zip (replicate (length vs) Strict) 
                                                           (map FValue vs))) ++
                                        map bump (filter ((>i) . fst) args_done)
                           bump (k,v) | k > i      = (k + length vs - 1, v)
                                      | otherwise  = (k,v)
-              let funconCont stepf = stepf >>= \case 
-                    Left f' -> stepTo (cons (remakeArgs args_done [f'] args_undone'))
-                    Right vs' -> stepTo (cons (remakeArgs args_done (map FValue vs') args_undone'))
-                   where remakeArgs m1 l1 m2 =  
-                          map (snd . snd) (sorter (filter ((<i) . fst) (m1++m2))) ++ l1 ++
-                          map (snd . snd) (sorter (filter ((>i) . fst) (m1++m2)))
 
-              concat [premiseEvalMultiple valueCont funconCont f]     
-            result
-    fmap uncurry $ evalSeqAux (partition (isDone . snd) args_map)
+funconCont:: ([Funcons] -> Funcons) 
+          -> [(Int, (Strictness, Funcons))]
+          -> [(Int, (Strictness, Funcons))]
+          -> Int
+          -> MSOS (Either Funcons [Values])
+          -> MSOS StepRes
+funconCont cons args_done args_undone' i stepf = stepf >>= \case 
+      Left f' -> stepTo (cons (remakeArgs args_done [f'] args_undone'))
+      Right vs' -> stepTo (cons (remakeArgs args_done (map FValue vs') args_undone'))
+      where sorter = sortBy (compare `on` fst)
+            remakeArgs m1 l1 m2 =  map (snd . snd) (sorter (filter((<i) . fst) (m1++m2))) ++ l1 ++ map (snd . snd) (sorter (filter ((>i) . fst) (m1++m2)))
+      
+
+evalSeqAux :: ([Funcons] -> Rewrite Rewritten)
+          -> ([Funcons] -> Funcons) 
+          -> [(Int, (Strictness, Funcons))]
+          -> [(Int, (Strictness, Funcons))]
+          -> Rewrite [Rewrite Rewritten]
+evalSeqAux cont cons args_done args_undone
+          | null args_undone = return [cont (map (snd . snd) (sorter args_done))]
+          | otherwise        = do
+            options <- maybe_randomRemove NDInterleaving args_undone
+            res <- forM options $ \option-> do
+                let ((i,(_,f)), args_undone') = option
+                return $ premiseEvalMultiple (valueCont cont cons args_undone' args_done i) (funconCont cons args_done args_undone' i) f
+            return $ concat res
+          where sorter = sortBy (compare `on` fst)
+
+evalSequence :: [Strictness] -> [Funcons] ->
+    ([Funcons] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) -> Rewrite [Rewrite Rewritten]
+evalSequence strns args cont cons = 
+  do
+    let args_map = zip [1..] (zip strns args)
+    -- fmap uncurry $ 
+    let (b,e) = partition (isDone . snd) args_map
+    evalSeqAux cont cons b e
  where  isDone (NonStrict, _)     = True
         isDone (Strict, FValue _) = True
         isDone (Strict,_)         = False
-        sorter = sortBy (compare `on` fst)
 
  
 {- lambda args_undone' args_done i f = do
@@ -993,7 +1026,7 @@ stepTrans opts i res = case res of
                           (stepAndOutput f) return continue
        where continue res = count_restart >> stepTrans opts (i+1) res
 
-stepAndOutput :: Funcons -> MSOS StepRes
+stepAndOutput :: Funcons -> MSOS [StepRes]
 stepAndOutput f = MSOS $ \ctxt mut ->
    let MSOS stepper' = evalFuncons f
        stepper ctxt mut = stepper' (setGlobal ctxt) mut
@@ -1006,6 +1039,7 @@ stepAndOutput f = MSOS $ \ctxt mut ->
                , val <- vals ]
            return (eres, mut', wr')
 
+-- stepAndOutputSingle
 
 toStepRes :: Funcons -> StepRes
 toStepRes (FValue v)  = Right [v]
