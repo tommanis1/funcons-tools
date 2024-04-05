@@ -20,7 +20,7 @@ library = libFromList [
 datatype_value_ = applyFuncon "datatype-value"
 adt_val_ = datatype_value_
 
-evalADT (f:fs) = evalStrictSequence (f:fs) cont adt_val_
+evalADT (f:fs) = head $ evalStrictSequence (f:fs) cont adt_val_
   where
     cont [] = error "eval-adt assert"
     cont (v:vs) = if isString_ v 
@@ -30,7 +30,7 @@ evalADT [] = sortErr (adt_val_ [])
                     "algebraic-datatype not applied to a string and a sequence of fields"
 
 lazy_adt_val_ = applyFuncon "non-strict-datatype-value"
-evalLazyADT (f:fs) = evalSequence (Strict : replicate (length fs) NonStrict) 
+evalLazyADT (f:fs) = head $ evalSequence (Strict : replicate (length fs) NonStrict) 
                           (f:fs) cont lazy_adt_val_
   where
     cont [] = error "lazy-eval-adt assert"

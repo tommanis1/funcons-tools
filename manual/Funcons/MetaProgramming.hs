@@ -77,7 +77,7 @@ dlRel v = case v of
   _ -> sortErr (meta_down_ (fvalues [v])) "meta-down not applied to a meta-representation"
 
 evalRel :: Funcons -> MSOS Values
-evalRel f = evalFuncons f >>= \case 
+evalRel f = head (evalFuncons f) >>= \case 
   Right [v]   -> return v
   Right vs    -> liftRewrite $ internal "meta evaluation yields a sequence of values"
   Left f'     -> evalRel f'
