@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase, OverloadedStrings, Rank2Types, TupleSections   
              , FlexibleInstances, ScopedTypeVariables  #-}
+{-# LANGUAGE InstanceSigs #-}
 
 -- module Funcons.MSOS (
 --     -- * Making steps
@@ -253,6 +254,7 @@ instance Functor Rewrite where
 instance Monad Rewrite  where
   return a = Rewrite (\_ st -> (Right a, st, mempty))
 
+  (>>=) :: Rewrite a -> (a -> Rewrite b) -> Rewrite b
   (Rewrite f) >>= k = Rewrite (\ctxt st ->
                     let res1@(e_a1,st1,cs1) = f ctxt st
                      in case e_a1 of
@@ -727,29 +729,42 @@ if_violates_refocus (MSOS fstep) viol no_viol = MSOS $ \ctxt mut ->
 --              stepTo (scope_ [FValue e1, x'])
 -- @
 
-action :: Rewrite Rewritten -> ( Rewritten -> [Rewrite Rewritten]) -> Rewrite Rewritten
-action (Rewrite f) k = Rewrite (\ctxt st ->
-                    let res1@(e_a1,st1,cs1) = f ctxt st
-                     in case e_a1 of
-                          Left err  -> (Left err, st1, cs1)
-                          Right a1  ->  do 
-                            let options = k a1
-                            head (map (\option -> 
-                                              let (Rewrite h) = option
-                                                  (a2,st2,cs2) = h ctxt st1
-                                              in (a2,st2,cs1 <> cs2))
-                                         options ))
-                            
-                            -- let (Rewrite h) = k a1
-                            --                (a2,st2,cs2) = h ctxt st1
-                            --             in (a2,st2,cs1 <> cs2))
+-- bindList :: [Rewrite a] -> (a -> [Rewrite b]) -> [Rewrite b]
+-- bindList rewrites k = test (head rewrites) k
+
+-- Rewrite Rewritten 
 
 premiseEval :: ([Values] -> [Rewrite Rewritten]) -> (MSOS StepRes -> MSOS StepRes) -> 
                     Funcons -> [Rewrite Rewritten]
-premiseEval vapp fapp f = concatMap (\rewrite ->  [action rewrite  (\case
-    (ValTerm vs)      -> vapp vs
-    -- CompTerm _ step -> buildStepCount (optRefocus (fapp step))
-    )  ])  (rewriteFuncons_all f)
+premiseEval vapp fapp f = (rewriteFuncons_all f) >>= \(Rewrite rew) ->
+  case rew ctxt st of
+    (Right (ValTerm vs), _, _) -> vapp vs 
+
+              
+  
+  -- concatMap (\rewrite ->  [action rewrite  (\case
+  --   (ValTerm vs)      -> vapp vs
+  --   -- CompTerm _ step -> buildStepCount (optRefocus (fapp step))
+  --   )  ])  (rewriteFuncons_all f)
+
+-- convert :: [Values] -> ([Values] -> [Rewrite Rewritten]) -> [[Values] -> Rewrite Rewritten]
+-- convert vs vapps = map (\x -> \y -> x) (vapps vs)
+-- premiseEval :: [[Values] -> Rewrite Rewritten] -> (MSOS StepRes -> MSOS StepRes) -> 
+--                     Funcons -> [Rewrite Rewritten]
+-- premiseEval vapps fapp f = do
+--   let rewrites :: [Rewrite Rewritten] = rewriteFuncons_all f
+--   concatMap (\rewrite ->
+--     map ( \vapp -> 
+--       rewrite >>=  (\case
+--     (ValTerm vs)      -> vapp vs
+--       )
+--     ) vapps 
+--      ) rewrites
+  
+  -- concatMap (\rewrite ->  [action rewrite  (\case
+  --   (ValTerm vs)      -> vapp vs
+  --   -- CompTerm _ step -> buildStepCount (optRefocus (fapp step))
+  --   )  ])  (rewriteFuncons_all f)
 
 -- | Execute a computational step as a /premise/.
 -- The result of the step is the returned funcon term. 
@@ -979,31 +994,47 @@ rewriteStrictSequence fs = case rest of
 --       CompTerm f0 mf -> [internal ("step on sequence of computations: " ++ show fs)]) (ff)
 --   where (vs, rest) = span (not . hasStep) fs
 
-r_action :: Rewrite Rewritten -> ( Rewritten -> [Rewrite [Values]]) -> Rewrite [Values]
-r_action (Rewrite f) k = Rewrite (\ctxt st ->
-                    let res1@(e_a1,st1,cs1) = f ctxt st
-                     in case e_a1 of
-                          Left err  -> (Left err, st1, cs1)
-                          Right a1  ->  do 
-                            let options = k a1
-                            head (map (\option -> 
-                                              let (Rewrite h) = option
-                                                  (a2,st2,cs2) = h ctxt st1
-                                              in (a2,st2,cs1 <> cs2))
-                                         options ))
-                            
+-- r_action :: Rewrite Rewritten -> ( Rewritten -> [Rewrite [Values]]) -> Rewrite [[Values]]
+-- r_action (Rewrite f) k = Rewrite (\ctxt st ->
+--                     let res1@(e_a1,st1,cs1) = f ctxt st
+--                      in case e_a1 of
+--                           Left err  -> [(Left err, st1, cs1)]
+--                           Right a1  ->   
+--                              map (\option -> 
+--                                               let (Rewrite h) = option
+--                                                   (a2,st2,cs2) = h ctxt st1
+--                                               in (a2,st2,cs1 <> cs2))
+--                                          (k a1) )
+-- :: Rewrite Rewritten -> ( Rewritten -> Rewrite [Values]) -> Rewrite [Values]
+--   (Rewrite f) >>= k = Rewrite (\ctxt st ->
+--                     let res1@(e_a1,st1,cs1) = f ctxt st
+--                      in case e_a1 of 
+--                           Left err  -> (Left err, st1, cs1)
+--                           Right a1  -> let (Rewrite h) = k a1
+--                                            (a2,st2,cs2) = h ctxt st1
+--                                         in (a2,st2,cs1 <> cs2))
+-- tmp ::  Rewrite Rewritten -> ( Rewritten -> [Rewrite [Values]]) -> [Rewrite [Values]]
+-- tmp (Rewrite f ) k = 
+
+-- sp :: [Rewrite Rewritten] -> ( Rewritten -> [Rewrite [Values]]) -> [Rewrite [Values]]
+-- sp f k = map ( \ x -> tmp x k ) f
 
 rewriteStrictSequence :: [Funcons] -> [Rewrite [Values]]
 rewriteStrictSequence fs = case rest of 
   []      -> [return (map downcastValue vs)]
-  (x:xs)  -> do
-    let ff :: [Rewrite Rewritten] = rewriteFuncons_all x
-    map (\x ->
-      r_action x (\case 
-      ValTerm vs'    -> rewriteStrictSequence (vs++map FValue vs'++xs)
-      CompTerm f0 mf -> [internal ("step on sequence of computations: " ++ show fs)])
-      ) ff
-  where (vs, rest) = span (not . hasStep) fs
+  (x:xs)  ->  bindList (rewriteFuncons_all x) (\case 
+    ValTerm vs'    -> rewriteStrictSequence (vs++map FValue vs'++xs)
+    CompTerm f0 mf -> [internal ("step on sequence of computations: " ++ show fs)]
+    )
+  where (vs, rest) = span (not . hasStep) fs 
+
+-- rewriteStrictSequence :: [Funcons] -> [Rewrite [Values]]
+-- rewriteStrictSequence fs = case rest of 
+--   []      -> [return (map downcastValue vs)]
+--   (x:xs)  -> rewriteFuncons x >>= \case 
+--     ValTerm vs'    -> rewriteStrictSequence (vs++map FValue vs'++xs)
+--     CompTerm f0 mf -> internal ("step on sequence of computations: " ++ show fs)
+--   where (vs, rest) = span (not . hasStep) fs
 
 -- --OPT: replace by specialised variant of evalSequence
 evalStrictSequence :: [Funcons] -> ([Values] -> Rewrite Rewritten) -> ([Funcons] -> Funcons) ->  [  Rewrite Rewritten]
@@ -1015,10 +1046,11 @@ valueCont :: ([Funcons] -> Rewrite Rewritten)
           -> ([Funcons] -> Funcons)  
           -> [(Int, (Strictness, Funcons))] 
           -> [(Int, (Strictness, Funcons))]
-          -> Int -> [Values] 
-          -> [ Rewrite Rewritten]
+
+          -> Int -> [Values]-> [Rewrite Rewritten]
 valueCont cont cons args_undone' args_done i vs = 
                     -- fmap count_rewrite 
+                     
                     (evalSeqAux cont cons args_done' (map bump args_undone'))
                     where args_done' = filter ((<i) . fst) args_done ++
                                         zip [i..] ((zip (replicate (length vs) Strict) 
