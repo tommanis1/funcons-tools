@@ -1,15 +1,32 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Funcons.Substitution (
-    Env(..), subsAndRewritesInEnv, subsAndRewritesToValueInEnv, subsAndRewritesToValue, subsAndRewritesToValuesInEnv, subsAndRewritesToValues,
+    Env(..), subsAndRewritesInEnv,
+    subsAndRewritesToValue, subsAndRewritesToValuesInEnv, subsAndRewritesToValues,
     envInsert, emptyEnv,
-    Levelled(..), substitute_signal, substitute,rewriteTermTo, stepTermTo,
+    Levelled(..), substitute_signal, substitute,rewriteTermTo, stepTermTo, rewriteTermTo',
     envRewrite, envStore, lifted_envRewrite, lifted_envStore, 
     fLevel, fsLevel, vLevel, vsLevel, envLookup
     ) where
 
 import Funcons.Types
 import Funcons.MSOS
+    ( internal,
+      liftInnerAndOuterRewrite,
+      liftRewrite,
+      rewriteFunconsWcount,
+      rewriteSeqTo,
+      rewriteTo,
+      rewriteTo',
+      rewriteToValErr,
+      rewritesToValue,
+      rewritesToValues,
+      stepSeqTo,
+      stepTo,
+      MSOS,
+      Rewrite(Rewrite),
+      Rewritten(..),
+      StepRes, convertMSOS )
 
 import Control.Applicative
 import Control.Monad
@@ -165,34 +182,45 @@ subsFlatten terms env = concat <$> (forM terms $ \case
 -- This function immediately returns a computational step when
 --  a given term has a cached step
 -- If the term is not just a meta-variable, this function behaves normally
-subsAndRewritesInEnv :: FTerm -> Env -> Rewrite (Rewritten, Env)
+subsAndRewritesInEnv :: FTerm -> Env -> Rewrite [Rewrite (Rewritten, Env)]
 subsAndRewritesInEnv (TVar x) env 
   | Just (FunconTerm f (Just step)) <- M.lookup x env = 
-      return $ (CompTerm f step, env)
+      return $ [return (CompTerm f step, env)]
 subsAndRewritesInEnv term env  = do 
   f <- substitute term env
-  res <- rewriteFunconsWcount f
+  options <- rewriteFunconsWcount f
   case term of 
-    TVar x -> case res of 
-     ValTerm vs       -> return (res, envInsert x (ValuesTerm vs) env)
-     CompTerm f step  -> return (res, envInsert x (FunconTerm f (Just step)) env)
-    _      -> return (res, env)
+    TVar x -> return $ map (\rewrite -> do
+      res <- rewrite
+      case res of 
+        ValTerm vs       -> return (res, envInsert x (ValuesTerm vs) env)
+        CompTerm f step  -> return (res, envInsert x (FunconTerm f (Just step)) env)) options
+    _ -> return $ map (\option -> do
+        res <- option 
+        return (res, env)) options
+      
+      -- return (res, env)
 
-subsAndRewritesToValue :: FTerm -> Env -> Rewrite Values
-subsAndRewritesToValue f env = fst <$> subsAndRewritesToValueInEnv f env
+subsAndRewritesToValue :: FTerm -> Env -> Rewrite [Rewrite Values]
+subsAndRewritesToValue f env = do
+  l <- subsAndRewritesToValueInEnv f env
+  return $ map (\r -> fst <$> r) l
+  -- fst <$> subsAndRewritesToValueInEnv f env
+
 
 -- Important optimisation:
 -- If the given term is a var, 
 --    update the env to store the rewritten value.
-subsAndRewritesToValueInEnv :: FTerm -> Env -> Rewrite (Values, Env)
+subsAndRewritesToValueInEnv :: FTerm -> Env -> Rewrite [Rewrite (Values, Env)]
 subsAndRewritesToValueInEnv (TVar x) env 
   -- assumed to be already rewritten (because cached step is present)
   | Just (FunconTerm f (Just step)) <- M.lookup x env = rewriteToValErr
 subsAndRewritesToValueInEnv term env = do
   f <- substitute term env 
-  v <- rewritesToValue f
-  case term of TVar var  -> return (v, envInsert var (ValueTerm v) env)
-               _         -> return (v, env)
+  vals <- rewritesToValue f
+  case term of 
+            TVar var  -> return $ map(\v -> return (v, envInsert var (ValueTerm v) env)) vals
+            _         -> return $ map(\v -> return (v, env)) vals
 
 subsAndRewritesToValues :: FTerm -> Env -> Rewrite [Values]
 subsAndRewritesToValues f env = fst <$> subsAndRewritesToValuesInEnv f env
@@ -209,15 +237,31 @@ subsAndRewritesToValuesInEnv term env = do
 
 
 -- | Variant of 'rewriteTo' that applies substitution.
-rewriteTermTo :: FTerm -> Env -> Rewrite Rewritten
-rewriteTermTo fterm env = subsFlatten [fterm] env >>= \case
-  [f] -> rewriteTo f
+rewriteTermTo' :: FTerm -> Env -> Rewrite [Rewrite Rewritten]
+rewriteTermTo' fterm env = subsFlatten [fterm] env >>= \case
+  [f] -> rewriteTo' f
   fs  -> rewriteSeqTo fs 
 
+rewriteTermTo :: FTerm -> Env -> Rewrite Rewritten
+rewriteTermTo fterm env = convert $ rewriteTermTo' fterm env
+
+convert :: Rewrite [Rewrite a] ->  Rewrite a
+convert (Rewrite l) = Rewrite ( \ctxt st ->
+    let (e_a1,st1,cs1) = l ctxt st
+    in case e_a1 of 
+        Left err  -> (Left err, st1, cs1)
+        Right a1 -> do 
+          let (Rewrite env) = (head a1)
+          env ctxt st
+    ) 
+
 -- | Variant of 'stepTo' that applies substitution.
-stepTermTo :: FTerm -> Env -> MSOS StepRes 
-stepTermTo fterm env = liftRewrite (subsFlatten [fterm] env) >>= \case 
-  [f] -> stepTo f
+stepTermTo :: FTerm -> Env ->  MSOS StepRes
+stepTermTo fterm env =  convertMSOS $ stepTermTo' fterm env
+
+stepTermTo' :: FTerm -> Env -> MSOS [MSOS StepRes]
+stepTermTo' fterm env = liftRewrite (subsFlatten [fterm] env) >>= \case 
+  [f] -> return [stepTo f]
   fs  -> stepSeqTo fs
 
 lifted_envStore :: MetaVar -> FTerm -> Env -> MSOS Env
@@ -228,17 +272,20 @@ envStore var term env = substitute term env >>= \case
     (FValue v)    -> return $ envInsert var (ValueTerm v) env
     fct           -> return $ envInsert var (FunconTerm fct Nothing) env
 
-lifted_envRewrite :: MetaVar -> Env -> MSOS Env
-lifted_envRewrite m e = liftRewrite (envRewrite m e)
+lifted_envRewrite :: MetaVar -> Env -> MSOS [MSOS Env]
+lifted_envRewrite m e = liftInnerAndOuterRewrite (envRewrite m e)
 
 -- | Apply as many rewrites as possible to the term bound to the
 -- given variable in the meta-environment
-envRewrite :: MetaVar -> Env -> Rewrite Env
+envRewrite :: MetaVar -> Env -> Rewrite [Rewrite Env]
 envRewrite var env = do
     envLookup env var >>= \case
-      FunconTerm fct Nothing -> rewriteFunconsWcount fct >>= \case
-        ValTerm vs    -> return $ envInsert var (ValuesTerm vs) env
-        CompTerm f fs -> return $ envInsert var (FunconTerm f (Just fs)) env
-      _ -> return env
+      FunconTerm fct Nothing -> rewriteFunconsWcount fct >>= (\options -> return $  map (\rewrite -> do
+        rewritten <- rewrite 
+        case rewritten of 
+          ValTerm vs    -> return $ envInsert var (ValuesTerm vs) env
+          CompTerm f fs -> return $ envInsert var (FunconTerm f (Just fs)) env
+       ) options )
+      _ -> return [return env]
 
 

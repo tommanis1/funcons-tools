@@ -1,5 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 
 module Funcons.Entities (
     -- * Accessing entities
@@ -43,16 +43,19 @@ data EntityDefault  = DefMutable Name Funcons
                     | DefControl Name
                     | DefInput Name
 
-setEntityDefaults :: EntityDefaults -> MSOS StepRes -> MSOS StepRes
-setEntityDefaults [] msos = msos
-setEntityDefaults ((DefMutable nm f):rest) msos = 
-    liftRewrite (rewriteFuncons f) >>= \case 
+setEntityDefaults :: EntityDefaults -> MSOS StepRes -> MSOS [MSOS StepRes]
+setEntityDefaults [] msos = return [msos]
+setEntityDefaults ((DefMutable nm f):rest) msos = do
+    l <- liftInnerAndOuterRewrite (rewriteFuncons f)
+    concatInsideMSOS $ sequence $ Prelude.map (\rw -> rw >>= \case 
         ValTerm vs  -> putMut nm vs >> setEntityDefaults rest msos
-        _           -> liftRewrite $ exception f "default value requires steps to evaluate"
-setEntityDefaults ((DefInherited nm f):rest) msos = 
-    liftRewrite (rewriteFuncons f) >>= \case
+        _           -> liftRewrite $ exception f "default value requires steps to evaluate") l
+setEntityDefaults ((DefInherited nm f):rest) msos = do
+    l <- liftInnerAndOuterRewrite (rewriteFuncons f)
+    concatInsideMSOS $ sequence $ Prelude.map (\rw -> rw>>= \case
         ValTerm vs  -> withInh nm vs (setEntityDefaults rest msos)
-        _           -> liftRewrite $ exception f "default value requires steps to evaluate" 
+        _           -> liftRewrite $ exception f "default value requires steps to evaluate" ) l
+    
 setEntityDefaults ((DefControl nm):rest) msos = 
     withControl nm Nothing (setEntityDefaults rest msos) 
 setEntityDefaults (_:rest) msos = setEntityDefaults rest msos
@@ -73,10 +76,13 @@ getMut :: Name -> MSOS [Values]
 getMut key = maybe [null__] id . M.lookup key <$> giveMUT 
 
 -- | Variant of 'getMut' that performs pattern-matching.
-getMutPatt :: Name -> [VPattern] -> Env -> MSOS Env
-getMutPatt nm pats env = do
+getMutPatt' :: Name -> [VPattern] -> Env -> MSOS [MSOS Env]
+getMutPatt' nm pats env = do
     vals <- getMut nm
-    liftRewrite (vsMatch vals pats env)
+    liftInnerAndOuterRewrite (vsMatch' vals pats env)
+
+getMutPatt :: Name -> [VPattern] -> Env ->  MSOS Env
+getMutPatt nm pats env = convertMSOS $ getMutPatt'  nm pats env
 
 modifyMUT :: Name -> ([Values] -> [Values]) -> MSOS ()
 modifyMUT key f = do    rw <- giveMUT
@@ -147,21 +153,29 @@ withInput isExactInput nm vs (MSOS f) = MSOS $ \ctxt mut -> do
 
 -- | Variant of 'consumeInput' that matches the given `VPattern` to the consumed
 -- value in the given 'Env'. 
-matchInput :: Name -> VPattern -> Env -> MSOS Env
-matchInput nm pat env = do 
+matchInput :: Name -> VPattern -> Env ->  MSOS Env
+matchInput nm pat env = convertMSOS $ matchInput' nm pat env
+
+matchInput' :: Name -> VPattern -> Env -> MSOS [MSOS Env]
+matchInput' nm pat env = do 
     fs <- consumeInput nm
     vs <- liftRewrite (rewritesToValues fs)
-    liftRewrite (vsMatch vs [pat] env)
+    liftInnerAndOuterRewrite (vsMatch' vs [pat] env)
 
 -- | Variant of 'withExtraInput' that performs substitution.
 withExtraInputTerms = withInputTerms False
 -- | Variant of 'withExactInput' that performs substitution.
+withExactInputTerms :: Name -> [FTerm] -> Env -> MSOS a -> MSOS [MSOS a]
 withExactInputTerms = withInputTerms True
 
-withInputTerms :: Bool -> Name -> [FTerm] -> Env -> MSOS a -> MSOS a
+withInputTerms :: Bool -> Name -> [FTerm] -> Env -> MSOS a -> MSOS [MSOS a]
 withInputTerms b nm fs env msos = do
-    vs <- liftRewrite (mapM (flip subsAndRewritesToValue env) fs)
-    withInput b nm vs msos
+      l <-  liftRewrite $ mapM (flip subsAndRewritesToValue env) fs
+      let a ::  [Rewrite[Values]] = Prelude.map sequence l
+      let ret = Prelude.map (\rw_vs -> do
+                                  vs <- rw_vs
+                                  withInput b nm vs msos) ( Prelude.map liftRewrite a)
+      return ret
 
 -- control
 -- | Receive the value of a control entity from a given 'MSOS' computation.
@@ -177,7 +191,10 @@ receiveSignals keys (MSOS f) = MSOS (\ctxt mut -> do
 
 -- | Variant of 'receiveSignal' that performs pattern-matching.
 receiveSignalPatt :: Maybe Values -> Maybe VPattern -> Env -> MSOS Env
-receiveSignalPatt mval mpat env = liftRewrite (vMaybeMatch mval mpat env)
+receiveSignalPatt mval mpat env = convertMSOS $ receiveSignalPatt'  mval mpat env
+receiveSignalPatt' :: Maybe Values -> Maybe VPattern -> Env -> MSOS[MSOS Env]
+receiveSignalPatt' mval mpat env = liftInnerAndOuterRewrite (vMaybeMatch mval mpat env)
+
 
 -- | Signal a value of some control entity.
 raiseSignal :: Name -> Values -> MSOS ()
@@ -185,8 +202,10 @@ raiseSignal nm v = MSOS (\ctxt mut -> return
                         (Right (), mut, mempty { ctrl_entities = singleCTRL nm v}))
 
 -- | Variant of 'raiseSignal' that applies substitution.
-raiseTerm :: Name -> FTerm -> Env -> MSOS ()
-raiseTerm nm term env = liftRewrite (subsAndRewritesToValue term env) >>= raiseSignal nm 
+raiseTerm :: Name -> FTerm -> Env -> MSOS [MSOS ()]
+raiseTerm nm term env = do 
+    op <- liftRewrite $ subsAndRewritesToValue term env
+    return $ Prelude.map (\rw -> liftRewrite rw >>= raiseSignal nm )op
 
 -- downwards control
 -- | Set the value of an downwards control entity. 
@@ -212,14 +231,20 @@ getControl key = do
     Just mv   -> return mv
 
 -- | Version of 'getControl' that applies pattern-matching.
-getControlPatt :: Name -> Maybe VPattern -> Env -> MSOS Env
-getControlPatt nm mpat env = do
+getControlPatt' :: Name -> Maybe VPattern -> Env -> MSOS [MSOS Env]
+getControlPatt' nm mpat env = do
     mpat' <- liftRewrite $ maybe (return Nothing) (fmap Just . flip substitute_patt_signal env) mpat
     mfct <- getControl nm
-    liftRewrite (eval_catch (vMaybeMatch mfct mpat' env) >>= \case
-      Left (_,_,PatternMismatch _)  -> return env --TODO suboptimal 
-      Left exc                      -> rewrite_rethrow exc
-      Right env'                    -> return env')
+    l <- liftRewrite $ vMaybeMatch mfct mpat' env
+    return $ Prelude.map (\ll -> 
+      liftRewrite (eval_catch (ll) >>= \case
+        Left (_,_,PatternMismatch _)  -> return env --TODO suboptimal 
+        Left exc                      -> rewrite_rethrow exc
+        Right env'                    -> return env')) l
+
+getControlPatt :: Name -> Maybe VPattern -> Env ->  MSOS Env
+getControlPatt nm mpat env = convertMSOS $ getControlPatt' nm mpat env
+
 
 
 -- inherited
@@ -232,11 +257,13 @@ getInh key = do  ro <- giveINH
                     Just vs -> return vs
 
 -- | Version of 'getInh' that applies pattern-matching.
-getInhPatt :: Name -> [VPattern] -> Env -> MSOS Env
-getInhPatt nm pats env = do
+getInhPatt' :: Name -> [VPattern] -> Env -> MSOS [MSOS Env]
+getInhPatt' nm pats env = do
     vals <- getInh nm
-    liftRewrite (vsMatch vals pats env)
+    liftInnerAndOuterRewrite (vsMatch' vals pats env)
 
+getInhPatt :: Name -> [VPattern] -> Env ->  MSOS Env
+getInhPatt nm pats env = convertMSOS $ getInhPatt' nm pats env
 -- | Set the value of an inherited entity. 
 -- The new value is /only/ set for 'MSOS' computation given as a third argument.
 withInh :: Name -> [Values] -> MSOS a -> MSOS a
@@ -268,7 +295,7 @@ readOut key msos = readOuts msos >>=
                         return . fmap (maybe [] id . M.lookup key)
 
 -- | Variant of 'readOut' that performs pattern-matching.
-readOutPatt :: Name -> VPattern -> MSOS Env -> MSOS Env 
+readOutPatt :: Name -> VPattern -> MSOS Env ->MSOS[ MSOS Env ]
 readOutPatt key pat msos = do
     (env, vals) <- readOut key msos
-    liftRewrite (vMatch (ADTVal "list" (Prelude.map FValue vals)) pat env)
+    liftInnerAndOuterRewrite (vMatch (ADTVal "list" (Prelude.map FValue vals)) pat env)

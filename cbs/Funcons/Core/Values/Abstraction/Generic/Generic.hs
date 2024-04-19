@@ -22,13 +22,14 @@ stepAbstraction fargs =
             env <- fsMatch fargs [PMetaVar "_X1"] env
             rewriteTermTo (TApp "non-strict-datatype-value" [TFuncon (FValue (ADTVal "list" [FValue (ADTVal "unicode-character" [FValue (Int 97)]),FValue (ADTVal "unicode-character" [FValue (Int 98)]),FValue (ADTVal "unicode-character" [FValue (Int 115)]),FValue (ADTVal "unicode-character" [FValue (Int 116)]),FValue (ADTVal "unicode-character" [FValue (Int 114)]),FValue (ADTVal "unicode-character" [FValue (Int 97)]),FValue (ADTVal "unicode-character" [FValue (Int 99)]),FValue (ADTVal "unicode-character" [FValue (Int 116)]),FValue (ADTVal "unicode-character" [FValue (Int 105)]),FValue (ADTVal "unicode-character" [FValue (Int 111)]),FValue (ADTVal "unicode-character" [FValue (Int 110)])])),TVar "_X1"]) env
 
+-- TODOD concat instead of double convert
 closure_ fargs = FApp "closure" (fargs)
 stepClosure fargs =
     evalRules [] [step1]
     where step1 = do
             let env = emptyEnv
             env <- lifted_fsMatch fargs [PMetaVar "X"] env
-            env <- getInhPatt "environment" [VPMetaVar "Rho"] env
+            env <-  getInhPatt "environment" [VPMetaVar "Rho"] env
             stepTermTo (TApp "abstraction" [TApp "closed" [TApp "scope" [TVar "Rho",TVar "X"]]]) env
 
 enact_ fargs = FApp "enact" (fargs)

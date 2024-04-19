@@ -77,11 +77,13 @@ dlRel v = case v of
   _ -> sortErr (meta_down_ (fvalues [v])) "meta-down not applied to a meta-representation"
 
 evalRel :: Funcons -> MSOS Values
-evalRel f = head (evalFuncons f) >>= \case 
+evalRel f = convertMSOS (evalFuncons f) >>= \case 
   Right [v]   -> return v
   Right vs    -> liftRewrite $ internal "meta evaluation yields a sequence of values"
   Left f'     -> evalRel f'
   where setGlobal f ctxt = ctxt { ereader = (ereader ctxt) { global_fct = f } }
+
+
 
 compile :: FunconLibrary -> TypeRelation -> Funcons -> Funcons -> Funcons
 compile lib tyenv fenv f = 
@@ -122,9 +124,12 @@ meta_let_ = applyFuncon "meta-let"
 
 eval_ = applyFuncon "eval"
 code_ = applyFuncon "code"
-step_meta_eval :: [Values] -> Rewrite Rewritten
-step_meta_eval [v] = dlRel v >>= rewriteTo
+
+step_meta_eval :: [Values] ->  Rewrite Rewritten
+step_meta_eval' [v] = 
+  dlRel v >>= rewriteTo
 step_meta_eval fs = sortErr (eval_ (fvalues fs)) "eval not applied to one argument"
+
 
 step_code :: [Funcons] -> Rewrite Rewritten
 step_code [f] = compstep (toStepRes <$> ulRel f)
@@ -134,7 +139,8 @@ ast_term = applyFuncon "ast-term"
 ast_value = applyFuncon "ast-value"
 
 type_of_ = applyFuncon "type-of"
-step_ty_of :: [Values] -> Rewrite Rewritten
+step_ty_of :: [Values] ->  Rewrite Rewritten
+-- TODO 
 step_ty_of [v] = rewriteTo $ type_ $ tyOf v
 step_ty_of vs = sortErr (type_of_ (fvalues vs)) "type-of not applied to a single value"
 

@@ -35,7 +35,7 @@ module Funcons.EDSL (
     -- *** Helpers to create rewrites & step rules
             rewriteTo, rewriteSeqTo, stepTo, stepSeqTo, 
               compstep, rewritten, premiseStep, premiseEval,
-                norule, sortErr, partialOp,
+                norule, sortErr, partialOp, rewritten', convertMSOS,
     -- *** Entities and entity access
         Inherited, getInh, withInh,
         Mutable, getMut, putMut,
@@ -91,29 +91,29 @@ import Funcons.TypeSubstitution
 
 import Control.Arrow ((***))
 
-congruence1_1 :: Name -> Funcons -> Rewrite Rewritten
-congruence1_1 fnm = compstep . premiseStepApp (flattenApp app) 
-    where app = applyFuncon fnm
+-- congruence1_1 :: Name -> Funcons -> Rewrite Rewritten
+-- congruence1_1 fnm = compstep . premiseStepApp (flattenApp app) 
+--     where app = applyFuncon fnm
 
-congruence1_2 :: Name -> Funcons -> Funcons -> Rewrite Rewritten
-congruence1_2 fnm arg1 arg2 = compstep $ premiseStepApp (flattenApp app) arg1 
-    where app fs = applyFuncon fnm (fs++[arg2])
+-- congruence1_2 :: Name -> Funcons -> Funcons -> Rewrite Rewritten
+-- congruence1_2 fnm arg1 arg2 = compstep $ premiseStepApp (flattenApp app) arg1 
+--     where app fs = applyFuncon fnm (fs++[arg2])
 
-congruence2_2 :: Name -> Funcons -> Funcons -> Rewrite Rewritten
-congruence2_2 fnm arg1 arg2 = compstep $ premiseStepApp (flattenApp app) arg2
-    where app fs = applyFuncon fnm (arg1:fs)
+-- congruence2_2 :: Name -> Funcons -> Funcons -> Rewrite Rewritten
+-- congruence2_2 fnm arg1 arg2 = compstep $ premiseStepApp (flattenApp app) arg2
+--     where app fs = applyFuncon fnm (arg1:fs)
 
-congruence1_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
-congruence1_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg1 
-    where app fs = applyFuncon fnm (fs ++ [arg2, arg3])
+-- congruence1_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
+-- congruence1_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg1 
+--     where app fs = applyFuncon fnm (fs ++ [arg2, arg3])
 
-congruence2_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
-congruence2_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg2 
-    where app fs = applyFuncon fnm (arg1 : fs ++ [arg3])
+-- congruence2_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
+-- congruence2_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg2 
+--     where app fs = applyFuncon fnm (arg1 : fs ++ [arg3])
 
-congruence3_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
-congruence3_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg3 
-    where app fs = applyFuncon fnm ([arg1, arg2] ++ fs)
+-- congruence3_3 :: Name -> Funcons -> Funcons -> Funcons -> Rewrite Rewritten
+-- congruence3_3 fnm arg1 arg2 arg3 = compstep $ premiseStepApp (flattenApp app) arg3 
+--     where app fs = applyFuncon fnm ([arg1, arg2] ++ fs)
 
 flattenApp :: ([Funcons] -> Funcons) -> (StepRes -> StepRes) 
 flattenApp app res = case res of 
@@ -138,30 +138,30 @@ library = libUnions [unLib, nullLib, binLib, floatsLib,boundedLib]
         boundedLib = libFromList (map (id *** mkBounded) boundedIntegerTypes)
 
         mkNullary :: Types -> EvalFunction 
-        mkNullary = NullaryFuncon . rewritten . typeVal
+        mkNullary = NullaryFuncon . rewritten' . typeVal
 
         mkFloats :: (IEEEFormats -> Types) -> EvalFunction
         mkFloats cons = StrictFuncon sfuncon
-            where   sfuncon [ADTVal "binary32" _] = rewritten $ typeVal $ cons Binary32
-                    sfuncon [ADTVal "binary64" _] = rewritten $ typeVal $ cons Binary64
+            where   sfuncon [ADTVal "binary32" _] = rewritten' $ typeVal $ cons Binary32
+                    sfuncon [ADTVal "binary64" _] = rewritten' $ typeVal $ cons Binary64
                     sfuncon vs = sortErr (tuple_val_ vs) "ieee-float not applied to ieee-format"
         mkBounded :: (Integer -> Types) -> EvalFunction
         mkBounded cons = StrictFuncon sfuncon
             where   sfuncon [v1] 
                         | Int i1 <- upcastIntegers v1 = 
-                                    rewritten $ typeVal $ cons i1
+                                    rewritten' $ typeVal $ cons i1
                     sfuncon v = sortErr (tuple_val_ v) "type not applied to an integer value" 
 
         mkUnary :: (Types -> Types) -> EvalFunction
         mkUnary cons = StrictFuncon sfuncon
-            where sfuncon [ComputationType (Type x)]  = rewritten $ typeVal $ cons x
-                  sfuncon  _                          = rewritten $ typeVal $ cons VAL.Values
+            where sfuncon [ComputationType (Type x)]  = rewritten' $ typeVal $ cons x
+                  sfuncon  _                          = rewritten' $ typeVal $ cons VAL.Values
 
         mkBinary :: (Types -> Types -> Types) -> EvalFunction
         mkBinary cons = StrictFuncon sfuncon
             where sfuncon [ComputationType (Type x), ComputationType (Type y)] = 
-                    rewritten $ typeVal $ maps (injectT x) (injectT y)
-                  sfuncon _ = rewritten $ typeVal $ cons VAL.Values VAL.Values
+                    rewritten' $ typeVal $ maps (injectT x) (injectT y)
+                  sfuncon _ = rewritten' $ typeVal $ cons VAL.Values VAL.Values
 
 app0_ :: ([Funcons] -> Funcons) -> Funcons
 app0_ cons = cons []

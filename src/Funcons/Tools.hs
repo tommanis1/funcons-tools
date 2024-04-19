@@ -149,7 +149,7 @@ emulate' reader lib defaults tyenv opts mf0 = do
     -- if in --interactive-mode the Interactive monad will be IO 
     --  and all the desired output will already have been printed to the screen
     ((e_exc_f, mut, wr), rem_ins) <- 
-        fexec (runMSOS (setEntityDefaults defaults (stepTrans opts 0 (toStepRes f0)))
+        fexec (runMSOS (convertMSOS $ setEntityDefaults defaults (convertMSOS $ stepTrans opts 0 (toStepRes f0)))
                 msos_ctxt ((emptyMSOSState (random_seed opts)){inp_es = inputs})) (inputValues opts)
     -- if not in --interactive-mode then print additional information based on flags
     unless (interactive_mode opts)
@@ -249,7 +249,7 @@ printTestResults fs defaults msos_ctxt msos_state wr rem_ins = do
     where   eval_ctxt = ereader msos_ctxt
             muts = mut_entities msos_state
             eval_state = estate msos_state
-            localEval name term = case runRewrite (rewriteFuncons term) eval_ctxt eval_state
+            localEval name term = case runRewrite (convert $ rewriteFuncons term) eval_ctxt eval_state
                 of  (Left ie,_,_) -> error ("internal exception in " ++ unpack name 
                                     ++ " evaluation:\n" ++ showIException ie)
                     (Right (ValTerm [v]),_,_) -> v
@@ -258,7 +258,7 @@ printTestResults fs defaults msos_ctxt msos_state wr rem_ins = do
                     (Right _,_,_) ->
                          error ("evaluation of " ++ unpack name ++ " requires step")
     
-            mLocalEval term = case runRewrite(rewriteFuncons term) eval_ctxt eval_state of
+            mLocalEval term = case runRewrite(convert $ rewriteFuncons term) eval_ctxt eval_state of
                 (Right (ValTerm [v]),_,_) -> Just v
                 _                         -> Nothing
 

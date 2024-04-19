@@ -163,10 +163,10 @@ def_interpreter opts_ref phrase cfg = do
                       override _ = Nothing
 
 loop :: RunOptions -> Funcons -> MSOS StepRes
-loop opts = stepTrans opts 0 . toStepRes
+loop opts  f = convertMSOS $ stepTrans opts 0 $ toStepRes f
 
 step :: Funcons -> MSOS StepRes
-step = stepAndOutput
+step f = convertMSOS $ stepAndOutput f
 
 done :: StepRes
 done = Right []

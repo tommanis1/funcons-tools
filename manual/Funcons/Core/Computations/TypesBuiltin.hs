@@ -11,4 +11,4 @@ library = libFromList [
   ]
 
 computation_types_ = applyFuncon "computation-types"
-stepComputation_Types = rewritten $ typeVal ComputationTypes
+stepComputation_Types = rewritten' $ typeVal ComputationTypes
