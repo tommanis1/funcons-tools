@@ -288,16 +288,40 @@ instance MVD.Evaluatem Funcons DebugConfig (Bool) where
       
       -- let msos_context :: Funcons.MSOS.MSOSReader IO  =  Funcons.MSOS.MSOSReader ( Funcons.MSOS.RewriteReader lib_single typeenv_single defaultRunOptions break break) Funcons.MSOS.emptyINH Funcons.MSOS.emptyDCTRL (Funcons.MSOS.fread (string_inputs defaultRunOptions))
 
-      let msos_ctxt = (reader config1) { ereader = (ereader (reader config1)) { local_fct = break, global_fct = break, run_opts = defaultRunOptions} }
+      let msos_ctxt = (reader config1) 
+      --{ ereader = (ereader (reader config1)) { local_fct = break, global_fct = break, run_opts = defaultRunOptions} }
 
-      -- (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes break)) msos_ctxt (setNDs []$ state config1) -- (Funcons.MSOS.emptyMSOSState (random_seed defaultRunOptions)) 
 
-      (e_exc_f, mut, wr) <- runMSOS (stepAndOutput break) msos_ctxt (setNDs []$ state config1) 
+      -- (e_exc_f, mut, wr) <- runMSOS (stepAndOutput break) msos_ctxt (setNDs []$ state config1) 
+      putStrLn $ show$ mut_entities $ state config
+ 
+      putStrLn $ "Progress:"
+      putStrLn $ show $ progress $ config
+      -- putStrLn $ show $ ty_env $ereader  (reader config1) 
 
-      putStrLn $ "breakpoint:"
-      putStrLn $ show break
+      -- print_reader $ reader config1
+      putStrLn "inh_entities current config"
+      putStrLn $ show$ inh_entities $ reader config1
+
+      
+      -- (e_exc_ff, mut, wr) <- runMSOS (stepTrans opts 0 (progress config)) msos_ctxt (setNDs []$ state config1) 
+      (e_exc_ff, mut, wr) <- runMSOS (stepTrans opts 0 (progress config)) msos_ctxt (state config1)--(setNDs []$ state config1) 
+      -- putStrLn "inh_entities after trans"
+      -- putStrLn $ show$ e_exc_ff
+      -- putStrLn ""
+      -- putStrLn "Config"
+      -- print_s mut
+      -- putStrLn "ctrl_entities wr"
+      -- putStrLn $ show $ ctrl_entities wr
+      -- putStrLn $ show e_exc_ff
+      -- putStrLn ""
+      
+
+      (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes break)) msos_ctxt( state config)
+
       putStrLn $ "res:"
       putStrLn $ show e_exc_f
+
 
 
       -- putStrLn $ show $ fct_parse_either "true"
@@ -321,6 +345,21 @@ instance MVD.Evaluatem Funcons DebugConfig (Bool) where
             case frombool $ head vals of
               (Just True) -> return True
               _ -> return False
+      -- where 
+        -- print_reader r = do
+        --   putStrLn $ "print_reader: "
+        --   putStrLn $ "inh_entities"
+        --   putStrLn $ show$ inh_entities $ r
+        --   putStrLn $ "dctrl_entities"
+        --   putStrLn $ show$ dctrl_entities$ r 
+        --   putStrLn ""
+        
+        -- print_s s = do
+        --   putStrLn $ "print_state: "
+
+        --   putStrLn $ "mut_entities"
+        --   putStrLn $ show$ mut_entities $ s
+
 
 instance Show Config where 
   show c = show (progress c)
@@ -408,12 +447,27 @@ debugExecute opts dcfg = do
         exec opts stepper f0 msos_ctxt nd_choices = do 
           (e_exc_f, mut, wr) <- runMSOS (stepper f0) msos_ctxt (setNDs nd_choices $ state cfg)
           case e_exc_f of
-            Left (curr, local, NDEncounter ndsrc) -> return [dcfg {ndeter = Just (local, ndsrc), nconfig = nconfig dcfg } ]
+            Left (curr, local, NDEncounter ndsrc) -> do 
+              -- putStrLn "C1"
+              -- putStrLn ""
+              -- putStrLn $ show curr
+              -- putStrLn ""
+              -- putStrLn $ show local
+              -- putStrLn ""
+
+              -- putStrLn $ show $ mut_entities mut
+              -- putStrLn ""
+              return [dcfg {ndeter = Just (local, ndsrc), nconfig = nconfig dcfg } ]
             Left ie    -> putStrLn (showIException ie) >> return []
-            Right (Left fct) -> return $ [dcfg { nconfig = cfg { state = mut, progress = Left fct}}] -- did not yield an environment
+            Right (Left fct) -> do 
+              return $ [dcfg { nconfig = cfg { state = mut, progress = Left fct}}] -- did not yield an environment
             Right (Right efvs) -> case filter isMap efvs of
-              []    -> return $ [dcfg { nconfig = cfg { state = mut, progress = Right efvs } }]
-              [env] -> return $ [dcfg { nconfig = cfg { reader = accumulate (reader cfg) env, state = mut, progress = Right efvs } } ]
+              []    -> do
+                return $ [dcfg { nconfig = cfg { state = mut, progress = Right efvs } }]
+              [env] -> do
+                -- print env
+                
+                return $ [dcfg { nconfig = cfg { reader = accumulate (reader cfg) env, state = mut, progress = Right efvs } } ]
               _     -> return [] 
           where accumulate msos_reader env = msos_reader { inh_entities = M.update override "environment" (inh_entities msos_reader) }
                   where override [old_env] = case (env, old_env) of 
