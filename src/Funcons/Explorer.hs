@@ -1,12 +1,12 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, LambdaCase, FlexibleContexts, RankNTypes, MultiParamTypeClasses #-}
-{-# LANGUAGE InstanceSigs, ScopedTypeVariables #-}
+{-# LANGUAGE InstanceSigs, ScopedTypeVariables, DataKinds#-}
 
 module Funcons.Explorer where
 
 import qualified Language.Explorer.Monadic as EI
 
 import Funcons.EDSL hiding (isMap)
-import Funcons.Operations (isMap, Values(Map), EvalResult(..), frombool) 
+import Funcons.Operations (isMap, Values(Map, Atom), EvalResult(..), frombool) 
 import Funcons.MSOS
 import Funcons.RunOptions
 import Funcons.Core
@@ -19,7 +19,7 @@ import Funcons.Printer
 import Funcons.Exceptions
 import Funcons.Types (Funcons(..))
 
-import Control.Monad (forM_, mapM_, join)
+import Control.Monad (forM_, mapM_, join, liftM2)
 import Control.Monad.Trans.Class (lift) 
 import Data.IORef
 import qualified Data.Map as M
@@ -269,6 +269,10 @@ display_help =
 
 type DebugConfig = DFunconsConfig
 
+data BooleanBreakpoint b = And (BooleanBreakpoint b) (BooleanBreakpoint b) | Or (BooleanBreakpoint b) (BooleanBreakpoint b) | B b
+data StoreBreakpoint = StoreBreakpoint {atom_id :: Int, val :: Funcons.EDSL.Values}
+
+
 instance MVD.Reduce () DebugConfig DebugConfig where 
     rstate _ c = c
 
@@ -279,86 +283,42 @@ instance MVD.Evaluate DebugConfig DebugConfig Bool where
 -- typeenv_single = Funcons.Core.Library.types
 
 -- f0_single = Funcons.Core.Library.initialise_binding_ [Funcons.Core.Library.initialise_storing_ [Funcons.Core.Manual.map_empty_ []]]
+fvalue_to_value :: Funcons -> Funcons.EDSL.Values
+fvalue_to_value (FValue v) = v
+fvalue_to_value _ = error "is not a value"
 
-instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
-    estatem :: Funcons -> DebugConfig -> IO Bool
-    estatem break (DFunconsConfig config _ _  opts) = do
-      let config1 = config  --{progress = Left break}
-      -- Not sure about opts
-      
-      -- let msos_context :: Funcons.MSOS.MSOSReader IO  =  Funcons.MSOS.MSOSReader ( Funcons.MSOS.RewriteReader lib_single typeenv_single defaultRunOptions break break) Funcons.MSOS.emptyINH Funcons.MSOS.emptyDCTRL (Funcons.MSOS.fread (string_inputs defaultRunOptions))
+brv :: Funcons.EDSL.Values
+brv = fvalue_to_value $ fct_parse "2"
 
-      let msos_ctxt = (reader config1) 
-      --{ ereader = (ereader (reader config1)) { local_fct = break, global_fct = break, run_opts = defaultRunOptions} }
+store :: Config ->  Funcons.EDSL.Values
+  --  Funcons.EDSL.Values
+store cfg = 
+  case M.lookup "store" (mut_entities $ state cfg) of
+        Nothing -> error ""
+        (Just store_list) -> case length store_list > 1 of
+            True ->  error ""
+            _ ->  head store_list
 
+convert (Map x) = x 
+instance (MVD.Evaluatem b DebugConfig Bool) => MVD.Evaluatem (BooleanBreakpoint b) DebugConfig Bool where
+   estatem (B c) cfg = MVD.estatem c cfg
+   estatem (And c1 c2) cfg = liftM2 (&&) (MVD.estatem c1 cfg) (MVD.estatem c2 cfg)
+   estatem (Or c1 c2) cfg = liftM2 (||) (MVD.estatem c1 cfg) (MVD.estatem c2 cfg)
 
-      -- (e_exc_f, mut, wr) <- runMSOS (stepAndOutput break) msos_ctxt (setNDs []$ state config1) 
-      putStrLn $ show$ mut_entities $ state config
- 
-      putStrLn $ "Progress:"
-      putStrLn $ show $ progress $ config
-      -- putStrLn $ show $ ty_env $ereader  (reader config1) 
-
-      -- print_reader $ reader config1
-      putStrLn "inh_entities current config"
-      putStrLn $ show$ inh_entities $ reader config1
-
-      
-      -- (e_exc_ff, mut, wr) <- runMSOS (stepTrans opts 0 (progress config)) msos_ctxt (setNDs []$ state config1) 
-      (e_exc_ff, mut, wr) <- runMSOS (stepTrans opts 0 (progress config)) msos_ctxt (state config1)--(setNDs []$ state config1) 
-      -- putStrLn "inh_entities after trans"
-      -- putStrLn $ show$ e_exc_ff
-      -- putStrLn ""
-      -- putStrLn "Config"
-      -- print_s mut
-      -- putStrLn "ctrl_entities wr"
-      -- putStrLn $ show $ ctrl_entities wr
-      -- putStrLn $ show e_exc_ff
-      -- putStrLn ""
-      
-
-      (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes break)) msos_ctxt( state config)
-
-      putStrLn $ "res:"
-      putStrLn $ show e_exc_f
-
-
-
-      -- putStrLn $ show $ fct_parse_either "true"
-      -- case fct_parse_either "true" of 
-      --   (Right f) -> do 
-      --           let msos_ctxt = (reader config1) { ereader = (ereader (reader config1)) { local_fct = f, global_fct = f, run_opts = defaultRunOptions  } }
-
-      --           (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes f)) msos_ctxt (Funcons.MSOS.emptyMSOSState (random_seed defaultRunOptions))  --(state config)
-      --           putStrLn "h"
-      --           putStrLn $ show e_exc_f
-
-
-
-      --   (Left _) -> putStrLn ""
-
-      case e_exc_f of 
-        (Left _) -> return False
-        (Right stepres) -> case stepres of
-          (Left _) -> return False
-          (Right vals) -> if null vals then return False else
-            case frombool $ head vals of
-              (Just True) -> return True
-              _ -> return False
-      -- where 
-        -- print_reader r = do
-        --   putStrLn $ "print_reader: "
-        --   putStrLn $ "inh_entities"
-        --   putStrLn $ show$ inh_entities $ r
-        --   putStrLn $ "dctrl_entities"
-        --   putStrLn $ show$ dctrl_entities$ r 
-        --   putStrLn ""
-        
-        -- print_s s = do
-        --   putStrLn $ "print_state: "
-
-        --   putStrLn $ "mut_entities"
-        --   putStrLn $ show$ mut_entities $ s
+instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
+   estatem :: StoreBreakpoint -> DebugConfig -> IO Bool
+   estatem condition (DFunconsConfig config _ _  opts)  = do
+      let s = convert $ store config
+      putStrLn $ show s
+      -- putStrLn $ show $ Atom "1"
+      putStrLn $ show $ M.lookup (Atom $ "@" ++ show (atom_id condition)) s
+      return False
+      case M.lookup (Atom $ "@" ++ show (atom_id condition)) s of
+        Nothing -> return False
+        (Just [v]) -> do
+          -- print "WOOOOOO"
+          return $  v == val condition
+        _ -> return False
 
 
 instance Show Config where 
@@ -375,14 +335,15 @@ repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger
                 case fct_parse_either input of 
                   Left err  -> outputStrLn err
                   Right fct -> do 
-                    getInputLine "Give a funcon term as a breakpoint > " >>= \case
-                      Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
+                    -- getInputLine "Give a funcon term as a breakpoint > " >>= \case
+                    --   Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
 
-                      (Just break) -> do
-                        case fct_parse_either break of 
-                          Left err  -> outputStrLn err
-                          Right fct_break -> do 
-                            lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm fct_break ()
+                      -- (Just break) -> do
+                        -- case fct_parse_either break of 
+                        --   Left err  -> outputStrLn err
+                        --   Right fct_break -> do 
+                            lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm (
+                              And (B $ StoreBreakpoint 1 brv) (B $ (StoreBreakpoint 1 brv))) ()
 
                         
 
