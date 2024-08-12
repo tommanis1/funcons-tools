@@ -1,11 +1,12 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, LambdaCase, FlexibleContexts, RankNTypes, MultiParamTypeClasses #-}
+{-# LANGUAGE InstanceSigs, ScopedTypeVariables #-}
 
 module Funcons.Explorer where
 
 import qualified Language.Explorer.Monadic as EI
 
 import Funcons.EDSL hiding (isMap)
-import Funcons.Operations (isMap, Values(Map), EvalResult(..)) 
+import Funcons.Operations (isMap, Values(Map), EvalResult(..), frombool) 
 import Funcons.MSOS
 import Funcons.RunOptions
 import Funcons.Core
@@ -273,6 +274,53 @@ instance MVD.Reduce () DebugConfig DebugConfig where
 
 instance MVD.Evaluate DebugConfig DebugConfig Bool where 
     estate goal curr = goal == curr 
+-- lib_single = Funcons.MSOS.libUnions [ Funcons.Core.Library.funcons, Funcons.EDSL.library, Funcons.Core.Manual.library ]
+-- entities_single = Funcons.Core.Library.entities 
+-- typeenv_single = Funcons.Core.Library.types
+
+-- f0_single = Funcons.Core.Library.initialise_binding_ [Funcons.Core.Library.initialise_storing_ [Funcons.Core.Manual.map_empty_ []]]
+
+instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
+    estatem :: Funcons -> DebugConfig -> IO Bool
+    estatem break (DFunconsConfig config _ _  opts) = do
+      let config1 = config  --{progress = Left break}
+      -- Not sure about opts
+      
+      -- let msos_context :: Funcons.MSOS.MSOSReader IO  =  Funcons.MSOS.MSOSReader ( Funcons.MSOS.RewriteReader lib_single typeenv_single defaultRunOptions break break) Funcons.MSOS.emptyINH Funcons.MSOS.emptyDCTRL (Funcons.MSOS.fread (string_inputs defaultRunOptions))
+
+      let msos_ctxt = (reader config1) { ereader = (ereader (reader config1)) { local_fct = break, global_fct = break, run_opts = defaultRunOptions} }
+
+      -- (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes break)) msos_ctxt (setNDs []$ state config1) -- (Funcons.MSOS.emptyMSOSState (random_seed defaultRunOptions)) 
+
+      (e_exc_f, mut, wr) <- runMSOS (stepAndOutput break) msos_ctxt (setNDs []$ state config1) 
+
+      putStrLn $ "breakpoint:"
+      putStrLn $ show break
+      putStrLn $ "res:"
+      putStrLn $ show e_exc_f
+
+
+      -- putStrLn $ show $ fct_parse_either "true"
+      -- case fct_parse_either "true" of 
+      --   (Right f) -> do 
+      --           let msos_ctxt = (reader config1) { ereader = (ereader (reader config1)) { local_fct = f, global_fct = f, run_opts = defaultRunOptions  } }
+
+      --           (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes f)) msos_ctxt (Funcons.MSOS.emptyMSOSState (random_seed defaultRunOptions))  --(state config)
+      --           putStrLn "h"
+      --           putStrLn $ show e_exc_f
+
+
+
+      --   (Left _) -> putStrLn ""
+
+      case e_exc_f of 
+        (Left _) -> return False
+        (Right stepres) -> case stepres of
+          (Left _) -> return False
+          (Right vals) -> if null vals then return False else
+            case frombool $ head vals of
+              (Just True) -> return True
+              _ -> return False
 
 instance Show Config where 
   show c = show (progress c)
@@ -287,7 +335,17 @@ repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger
             (Just input) -> do
                 case fct_parse_either input of 
                   Left err  -> outputStrLn err
-                  Right fct -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
+                  Right fct -> do 
+                    getInputLine "Give a funcon term as a breakpoint > " >>= \case
+                      Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
+
+                      (Just break) -> do
+                        case fct_parse_either break of 
+                          Left err  -> outputStrLn err
+                          Right fct_break -> do 
+                            lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm fct_break ()
+
+                        
 
 
 data FunconsActions = FStep | NDChoice Int NDInput
