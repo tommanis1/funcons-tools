@@ -324,7 +324,144 @@ instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
 instance Show Config where 
   show c = show (progress c)
 
+-- swap to_be_replaced new term = if term == to_be_replaced then new else swap' to_be_replaced new term 
+--   where swap' to_be_replaced new t@(FSet l) = if t == to_be_replaced then new else FSet $ map (swap' to_be_replaced new) l
+--         swap' to_be_replaced new t@(FMap l) = if t == to_be_replaced then new else FMap $ map (swap' to_be_replaced new) l
+--         swap' to_be_replaced new t@(FBinding l) = FMap $ map (swap' to_be_replaced new) l
 
+--                 | FBinding Funcons [Funcons] -- required for map-notation
+--                 | FSortSeq Funcons VAL.SeqSortOp
+--                 | FSortPower Funcons Funcons {- evals to natural number -}
+--                 | FSortUnion Funcons Funcons
+--                 | FSortInter Funcons Funcons
+--                 | FSortComplement Funcons
+--                 | FSortComputes Funcons
+--                 | FSortComputesFrom Funcons Funcons 
+--         swap' to_be_replaced new term = if term == to_be_replaced then new else term
+
+-- swap :: Funcons -> Funcons -> Funcons -> IO Funcons
+-- swap to_be_replaced new term
+--     | term == to_be_replaced = new
+--     | otherwise = case term of
+--         FApp n l -> FApp n (map (swap to_be_replaced new) l)
+--         FSet l         -> FSet (map (swap to_be_replaced new) l)
+--         FMap l         -> FMap (map (swap to_be_replaced new) l)
+--         FBinding f l     -> FBinding (swap to_be_replaced new f) (map (swap to_be_replaced new) l)
+--         FSortSeq f op  -> FSortSeq (swap to_be_replaced new f) op
+--         FSortPower f1 f2 -> FSortPower (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortUnion f1 f2 -> FSortUnion (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortInter f1 f2 -> FSortInter (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortComplement f -> FSortComplement (swap to_be_replaced new f)
+--         FSortComputes f -> FSortComputes (swap to_be_replaced new f)
+--         FSortComputesFrom f1 f2 -> FSortComputesFrom (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         _              -> term
+
+swap :: Funcons -> Funcons -> Funcons -> IO Funcons
+swap to_be_replaced new term
+    | term == to_be_replaced = return new
+    | otherwise = case term of
+        t@(FApp n l) ->
+            if n == "sequential" then do
+              -- putStrLn "Term"
+              -- putStrLn $ show to_be_replaced
+  
+              -- putStrLn "FApp"
+              -- putStrLn $ show t
+              -- putStrLn $ show $ t == to_be_replaced
+
+              -- l' <- mapM (swap to_be_replaced new) l
+              return $ FApp n [new]
+              -- l'
+            else do
+              l' <- mapM (swap to_be_replaced new) l
+              return $ FApp n l'
+        FSet l -> do
+            l' <- mapM (swap to_be_replaced new) l
+            return $ FSet l'
+        FMap l -> do
+            l' <- mapM (swap to_be_replaced new) l
+            return $ FMap l'
+        FBinding f l -> do
+            f' <- swap to_be_replaced new f
+            l' <- mapM (swap to_be_replaced new) l
+            return $ FBinding f' l'
+        FSortSeq f op -> do
+            f' <- swap to_be_replaced new f
+            return $ FSortSeq f' op
+        FSortPower f1 f2 -> do
+            f1' <- swap to_be_replaced new f1
+            f2' <- swap to_be_replaced new f2
+            return $ FSortPower f1' f2'
+        FSortUnion f1 f2 -> do
+            f1' <- swap to_be_replaced new f1
+            f2' <- swap to_be_replaced new f2
+            return $ FSortUnion f1' f2'
+        FSortInter f1 f2 -> do
+            f1' <- swap to_be_replaced new f1
+            f2' <- swap to_be_replaced new f2
+            return $ FSortInter f1' f2'
+        FSortComplement f -> do
+            f' <- swap to_be_replaced new f
+            return $ FSortComplement f'
+        FSortComputes f -> do
+            f' <- swap to_be_replaced new f
+            return $ FSortComputes f'
+        FSortComputesFrom f1 f2 -> do
+            f1' <- swap to_be_replaced new f1
+            f2' <- swap to_be_replaced new f2
+            return $ FSortComputesFrom f1' f2'
+        _ -> return term
+
+swap_main = swap $ fct_parse "apply(assigned(bound(\"main\")),tuple( ))"
+
+
+
+instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
+    estatem :: Funcons -> DebugConfig -> IO Bool
+    estatem break (DFunconsConfig config _ _  opts) = do
+      let config1 = config  --{progress = Left break}
+      case progress config of 
+        (Left f) -> do
+          putStrLn "T"
+          -- putStrLn $ show $ fct_parse "apply(assigned(bound(\"main\")))"
+          putStrLn $ show $ progress config
+          
+          n <- swap_main break $ f
+          putStrLn $ show n
+
+          (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes n)) (reader config) ( state config)
+          putStrLn $ show e_exc_f
+
+          case e_exc_f of 
+            (Left _) -> return False
+            (Right stepres) -> case stepres of
+              (Left _) -> return False
+              (Right vals) -> if null vals then return False else
+                case frombool $ head vals of
+                  (Just True) -> return True
+                  _ -> return False
+
+        _ -> return False -- TODO
+
+
+-- repl :: IO ()
+-- repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger)
+--   where buildDebugger (runopts, cfg) = do
+--           getInputLine " > " >>= \case
+--             Nothing -> return ()
+--             (Just input) -> do
+--                 case fct_parse_either input of 
+--                   Left err  -> outputStrLn err
+--                   Right fct -> do 
+--                     -- getInputLine "Give a funcon term as a breakpoint > " >>= \case
+--                     --   Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
+
+--                       -- (Just break) -> do
+--                         -- case fct_parse_either break of 
+--                         --   Left err  -> outputStrLn err
+--                         --   Right fct_break -> do 
+--                             lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm (
+--                               And (B $ StoreBreakpoint 1 brv) (B $ (StoreBreakpoint 1 brv))) ()
 
 repl :: IO ()
 repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger)
@@ -335,15 +472,14 @@ repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger
                 case fct_parse_either input of 
                   Left err  -> outputStrLn err
                   Right fct -> do 
-                    -- getInputLine "Give a funcon term as a breakpoint > " >>= \case
-                    --   Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
+                    getInputLine "Give a funcon term as a breakpoint > " >>= \case
+                      Nothing -> lift $ MVD.debugger (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinder (DFunconsConfig { nconfig = cfg, ndeter = Nothing }) ()
 
-                      -- (Just break) -> do
-                        -- case fct_parse_either break of 
-                        --   Left err  -> outputStrLn err
-                        --   Right fct_break -> do 
-                            lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm (
-                              And (B $ StoreBreakpoint 1 brv) (B $ (StoreBreakpoint 1 brv))) ()
+                      (Just break) -> do
+                        case fct_parse_either break of 
+                          Left err  -> outputStrLn err
+                          Right fct_break -> do 
+                            lift $ MVD.debuggerm (printDFunconsConfig runopts) (putStrLn . showFunconsActions runopts) (funconsSTR runopts (debugExecute runopts) (cfg { progress = Left fct})) MVD.equalityFinderm fct_break ()
 
                         
 
