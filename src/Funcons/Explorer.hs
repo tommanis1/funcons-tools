@@ -291,7 +291,6 @@ brv :: Funcons.EDSL.Values
 brv = fvalue_to_value $ fct_parse "2"
 
 store :: Config ->  Funcons.EDSL.Values
-  --  Funcons.EDSL.Values
 store cfg = 
   case M.lookup "store" (mut_entities $ state cfg) of
         Nothing -> error ""
@@ -312,7 +311,7 @@ instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
       putStrLn $ show s
       -- putStrLn $ show $ Atom "1"
       putStrLn $ show $ M.lookup (Atom $ "@" ++ show (atom_id condition)) s
-      return False
+      -- return False
       case M.lookup (Atom $ "@" ++ show (atom_id condition)) s of
         Nothing -> return False
         (Just [v]) -> do
@@ -324,37 +323,6 @@ instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
 instance Show Config where 
   show c = show (progress c)
 
--- swap to_be_replaced new term = if term == to_be_replaced then new else swap' to_be_replaced new term 
---   where swap' to_be_replaced new t@(FSet l) = if t == to_be_replaced then new else FSet $ map (swap' to_be_replaced new) l
---         swap' to_be_replaced new t@(FMap l) = if t == to_be_replaced then new else FMap $ map (swap' to_be_replaced new) l
---         swap' to_be_replaced new t@(FBinding l) = FMap $ map (swap' to_be_replaced new) l
-
---                 | FBinding Funcons [Funcons] -- required for map-notation
---                 | FSortSeq Funcons VAL.SeqSortOp
---                 | FSortPower Funcons Funcons {- evals to natural number -}
---                 | FSortUnion Funcons Funcons
---                 | FSortInter Funcons Funcons
---                 | FSortComplement Funcons
---                 | FSortComputes Funcons
---                 | FSortComputesFrom Funcons Funcons 
---         swap' to_be_replaced new term = if term == to_be_replaced then new else term
-
--- swap :: Funcons -> Funcons -> Funcons -> IO Funcons
--- swap to_be_replaced new term
---     | term == to_be_replaced = new
---     | otherwise = case term of
---         FApp n l -> FApp n (map (swap to_be_replaced new) l)
---         FSet l         -> FSet (map (swap to_be_replaced new) l)
---         FMap l         -> FMap (map (swap to_be_replaced new) l)
---         FBinding f l     -> FBinding (swap to_be_replaced new f) (map (swap to_be_replaced new) l)
---         FSortSeq f op  -> FSortSeq (swap to_be_replaced new f) op
---         FSortPower f1 f2 -> FSortPower (swap to_be_replaced new f1) (swap to_be_replaced new f2)
---         FSortUnion f1 f2 -> FSortUnion (swap to_be_replaced new f1) (swap to_be_replaced new f2)
---         FSortInter f1 f2 -> FSortInter (swap to_be_replaced new f1) (swap to_be_replaced new f2)
---         FSortComplement f -> FSortComplement (swap to_be_replaced new f)
---         FSortComputes f -> FSortComputes (swap to_be_replaced new f)
---         FSortComputesFrom f1 f2 -> FSortComputesFrom (swap to_be_replaced new f1) (swap to_be_replaced new f2)
---         _              -> term
 
 swap :: Funcons -> Funcons -> Funcons -> IO Funcons
 swap to_be_replaced new term
@@ -416,33 +384,69 @@ swap_main = swap $ fct_parse "apply(assigned(bound(\"main\")),tuple( ))"
 
 
 
+-- instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
+--     estatem :: Funcons -> DebugConfig -> IO Bool
+--     estatem break (DFunconsConfig config _ _  opts) = do
+--       case progress config of 
+--         (Left f) -> do
+--           putStrLn "T"
+--           -- putStrLn $ show $ fct_parse "apply(assigned(bound(\"main\")))"
+--           putStrLn $ show $ progress config
+
+          
+--           n <- swap_main break $ f
+--           putStrLn $ show n
+
+--           (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes n)) (reader config) ( state config)
+--           putStrLn $ show e_exc_f
+--           putStrLn $ show$ inh_entities $ reader config
+--           putStrLn $ show$ mut_entities $ state config
+
+--           -- return False
+
+--           case e_exc_f of 
+--             (Left _) -> return False
+--             (Right stepres) -> case stepres of
+--               (Left _) -> return False
+--               (Right vals) -> if null vals then return False else
+--                 case frombool $ head vals of
+--                   (Just True) -> return True
+--                   _ -> return False
+
+--         _ -> return False -- TODO
+
+-- Seach for environments
+-- instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
+--     estatem :: Funcons -> DebugConfig -> IO Bool
+--     estatem break (DFunconsConfig config _ _  opts) = do
+--       let inh = inh_entities $ reader config
+--       putStrLn $ show inh
+--       case M.lookup "environment" inh of 
+--         Nothing -> return False
+--         (Just e) -> case M.null (convert $ head e) of 
+--           True -> return False 
+--           _ -> do 
+--             putStrLn $ show (convert $ head e)
+--             return True
+
+
 instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
     estatem :: Funcons -> DebugConfig -> IO Bool
-    estatem break (DFunconsConfig config _ _  opts) = do
-      let config1 = config  --{progress = Left break}
-      case progress config of 
-        (Left f) -> do
-          putStrLn "T"
-          -- putStrLn $ show $ fct_parse "apply(assigned(bound(\"main\")))"
-          putStrLn $ show $ progress config
-          
-          n <- swap_main break $ f
-          putStrLn $ show n
+    estatem break dc@(DFunconsConfig config _ _  opts) = do
+      printDFunconsConfig opts dc
+      putStrLn $ show $ mut_entities $ state config
+      let inh = inh_entities $ reader config
+      putStrLn $ show inh
+      case M.lookup "environment" inh of 
+        Nothing -> return False
+        (Just e) -> case M.null (convert $ head e) of 
+          True -> return False 
+          _ -> do 
+            putStrLn $ show (convert $ head e)
+            return True
 
-          (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes n)) (reader config) ( state config)
-          putStrLn $ show e_exc_f
 
-          case e_exc_f of 
-            (Left _) -> return False
-            (Right stepres) -> case stepres of
-              (Left _) -> return False
-              (Right vals) -> if null vals then return False else
-                case frombool $ head vals of
-                  (Just True) -> return True
-                  _ -> return False
-
-        _ -> return False -- TODO
-
+    
 
 -- repl :: IO ()
 -- repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger)
@@ -507,14 +511,19 @@ printDFunconsConfig opts c
   | isJust (ndeter c) = do
     putStr "Current term: "
     putStrLn $ showProgress opts (progress $ nconfig c)
+    -- $ show $ c
     putStrLn $ "Non-determinism choice at: " ++ ppFuncons opts (fst . fromJust . ndeter $ c)
   | otherwise =  do
     putStr "Current term: "
     putStrLn $ showProgress opts (progress $ nconfig c)
+    -- show $ c
+    
+    -- showProgress opts (progress $ nconfig c)
 
 
 instance Eq DFunconsConfig where 
-  d1 == d2 = nconfig d1 == nconfig d2
+  d1 == d2 = nconfig d1 == nconfig d2  && ndeter d1 == Nothing && ndeter d2 == Nothing 
+  -- ss&& ndeter d1 == ndeter d2
 
 -- Funcons [Values]
 showProgress :: RunOptions -> StepRes -> String
@@ -524,8 +533,8 @@ showProgress _ (Right vs) = show vs
 
 instance Show DFunconsConfig where 
   show c = case ndeter c of 
-    Nothing -> (showProgress (opts c) . progress $ nconfig c) ++ "\n" 
-    (Just (l, _)) -> show (nconfig c) ++ "\n" ++ "Has non-determinism: " ++ ppFuncons (opts c) l ++ "\n"
+    Nothing -> (showProgress (opts c) . progress $ nconfig c) ++ "\n" ++ "Mut:\n"++ show ( mut_entities $ state$ nconfig c)
+    (Just (l, _)) -> show (nconfig c) ++ "\n" ++ "Has non-determinism: " ++ ppFuncons (opts c) l ++ "\n" ++ "Mut:\n"++ show ( mut_entities $ state$ nconfig c)
 
 
 debugExecute :: RunOptions -> DFunconsConfig -> IO [DFunconsConfig]
