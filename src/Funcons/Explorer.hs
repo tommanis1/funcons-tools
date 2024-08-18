@@ -6,7 +6,7 @@ module Funcons.Explorer where
 import qualified Language.Explorer.Monadic as EI
 
 import Funcons.EDSL hiding (isMap)
-import Funcons.Operations (isMap, Values(Map, Atom), EvalResult(..), frombool) 
+import Funcons.Operations (isMap, Values(Map, Atom, ADTVal), EvalResult(..), frombool) 
 import Funcons.MSOS
 import Funcons.RunOptions
 import Funcons.Core
@@ -17,7 +17,7 @@ import Funcons.Tools
 import Funcons.Parser
 import Funcons.Printer
 import Funcons.Exceptions
-import Funcons.Types (Funcons(..))
+import Funcons.Types (Funcons(..), Name, Values(..))
 
 import Control.Monad (forM_, mapM_, join, liftM2)
 import Control.Monad.Trans.Class (lift) 
@@ -306,7 +306,7 @@ instance (MVD.Evaluatem b DebugConfig Bool) => MVD.Evaluatem (BooleanBreakpoint 
 
 instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
    estatem :: StoreBreakpoint -> DebugConfig -> IO Bool
-   estatem condition (DFunconsConfig config _ _  opts)  = do
+   estatem condition (DFunconsConfig config _ _  opts _)  = do
       let s = convert $ store config
       putStrLn $ show s
       -- putStrLn $ show $ Atom "1"
@@ -323,64 +323,125 @@ instance MVD.Evaluatem StoreBreakpoint DebugConfig (Bool) where
 instance Show Config where 
   show c = show (progress c)
 
+-- def 
+-- data Funcons    = FName Name
+--                 | FApp Name [Funcons]
+-- --                | FTuple [Funcons]
+-- --                | FList [Funcons]
+--                 | FSet [Funcons]
+--                 | FMap [Funcons]
+--                 | FBinding Funcons [Funcons] -- required for map-notation
+--                 | FValue Values
+--                 | FSortSeq Funcons VAL.SeqSortOp
+--                 | FSortPower Funcons Funcons {- evals to natural number -}
+--                 | FSortUnion Funcons Funcons
+--                 | FSortInter Funcons Funcons
+--                 | FSortComplement Funcons
+--                 | FSortComputes Funcons
+--                 | FSortComputesFrom Funcons Funcons 
+--                 deriving (Eq, Ord, Show, Read)
 
-swap :: Funcons -> Funcons -> Funcons -> IO Funcons
-swap to_be_replaced new term
-    | term == to_be_replaced = return new
-    | otherwise = case term of
-        t@(FApp n l) ->
-            if n == "sequential" then do
-              -- putStrLn "Term"
-              -- putStrLn $ show to_be_replaced
+-- swap :: Funcons -> Funcons -> Funcons -> IO Funcons
+-- swap to_be_replaced new term
+--     | term == to_be_replaced = return new
+--     | otherwise = case term of
+--         t@(FApp n l) ->
+--             if n == "sequential" then do
+--               -- putStrLn "Term"
+--               -- putStrLn $ show to_be_replaced
   
-              -- putStrLn "FApp"
-              -- putStrLn $ show t
-              -- putStrLn $ show $ t == to_be_replaced
+--               -- putStrLn "FApp"
+--               -- putStrLn $ show t
+--               -- putStrLn $ show $ t == to_be_replaced
 
-              -- l' <- mapM (swap to_be_replaced new) l
-              return $ FApp n [new]
-              -- l'
-            else do
-              l' <- mapM (swap to_be_replaced new) l
-              return $ FApp n l'
-        FSet l -> do
-            l' <- mapM (swap to_be_replaced new) l
-            return $ FSet l'
-        FMap l -> do
-            l' <- mapM (swap to_be_replaced new) l
-            return $ FMap l'
-        FBinding f l -> do
-            f' <- swap to_be_replaced new f
-            l' <- mapM (swap to_be_replaced new) l
-            return $ FBinding f' l'
-        FSortSeq f op -> do
-            f' <- swap to_be_replaced new f
-            return $ FSortSeq f' op
-        FSortPower f1 f2 -> do
-            f1' <- swap to_be_replaced new f1
-            f2' <- swap to_be_replaced new f2
-            return $ FSortPower f1' f2'
-        FSortUnion f1 f2 -> do
-            f1' <- swap to_be_replaced new f1
-            f2' <- swap to_be_replaced new f2
-            return $ FSortUnion f1' f2'
-        FSortInter f1 f2 -> do
-            f1' <- swap to_be_replaced new f1
-            f2' <- swap to_be_replaced new f2
-            return $ FSortInter f1' f2'
-        FSortComplement f -> do
-            f' <- swap to_be_replaced new f
-            return $ FSortComplement f'
-        FSortComputes f -> do
-            f' <- swap to_be_replaced new f
-            return $ FSortComputes f'
-        FSortComputesFrom f1 f2 -> do
-            f1' <- swap to_be_replaced new f1
-            f2' <- swap to_be_replaced new f2
-            return $ FSortComputesFrom f1' f2'
-        _ -> return term
+--               -- l' <- mapM (swap to_be_replaced new) l
+--               return $ FApp n [new]
+--               -- l'
+--             else do
+--               l' <- mapM (swap to_be_replaced new) l
+--               return $ FApp n l'
+--         FSet l -> do
+--             l' <- mapM (swap to_be_replaced new) l
+--             return $ FSet l'
+--         FMap l -> do
+--             l' <- mapM (swap to_be_replaced new) l
+--             return $ FMap l'
+--         FBinding f l -> do
+--             f' <- swap to_be_replaced new f
+--             l' <- mapM (swap to_be_replaced new) l
+--             return $ FBinding f' l'
+--         FSortSeq f op -> do
+--             f' <- swap to_be_replaced new f
+--             return $ FSortSeq f' op
+--         FSortPower f1 f2 -> do
+--             f1' <- swap to_be_replaced new f1
+--             f2' <- swap to_be_replaced new f2
+--             return $ FSortPower f1' f2'
+--         FSortUnion f1 f2 -> do
+--             f1' <- swap to_be_replaced new f1
+--             f2' <- swap to_be_replaced new f2
+--             return $ FSortUnion f1' f2'
+--         FSortInter f1 f2 -> do
+--             f1' <- swap to_be_replaced new f1
+--             f2' <- swap to_be_replaced new f2
+--             return $ FSortInter f1' f2'
+--         FSortComplement f -> do
+--             f' <- swap to_be_replaced new f
+--             return $ FSortComplement f'
+--         FSortComputes f -> do
+--             f' <- swap to_be_replaced new f
+--             return $ FSortComputes f'
+--         FSortComputesFrom f1 f2 -> do
+--             f1' <- swap to_be_replaced new f1
+--             f2' <- swap to_be_replaced new f2
+--             return $ FSortComputesFrom f1' f2'
+--         _ -> return term
 
-swap_main = swap $ fct_parse "apply(assigned(bound(\"main\")),tuple( ))"
+--     | term == to_be_replaced = new
+--     | otherwise = case term of
+--         FApp n l -> FApp n (map (swap to_be_replaced new) l)
+--         FSet l         -> FSet (map (swap to_be_replaced new) l)
+--         FMap l         -> FMap (map (swap to_be_replaced new) l)
+--         FBinding f l     -> FBinding (swap to_be_replaced new f) (map (swap to_be_replaced new) l)
+--         FSortSeq f op  -> FSortSeq (swap to_be_replaced new f) op
+--         FSortPower f1 f2 -> FSortPower (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortUnion f1 f2 -> FSortUnion (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortInter f1 f2 -> FSortInter (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         FSortComplement f -> FSortComplement (swap to_be_replaced new f)
+--         FSortComputes f -> FSortComputes (swap to_be_replaced new f)
+--         FSortComputesFrom f1 f2 -> FSortComputesFrom (swap to_be_replaced new f1) (swap to_be_replaced new f2)
+--         _              -> term
+
+find_scopes :: Funcons -> [Funcons]
+find_scopes term = find_scopes' term []
+  where
+    find_scopes' :: Funcons -> [Funcons] -> [Funcons]
+    find_scopes' term found = case term of
+        t@(FApp n l) -> 
+            let new_found = if n == "scope" 
+                            then t : found 
+                            else found
+            in foldr find_scopes' new_found l
+        FSet l         -> foldr find_scopes' found l
+        FMap l         -> foldr find_scopes' found l
+        FValue vals ->  find_scopes_vals found vals
+        FBinding f l   -> find_scopes' f found ++ foldr find_scopes' found l
+        FSortSeq f op  -> find_scopes' f found
+        FSortPower f1 f2 -> find_scopes' f1 found ++ find_scopes' f2 found
+        FSortUnion f1 f2 -> find_scopes' f1 found ++ find_scopes' f2 found
+        FSortInter f1 f2 -> find_scopes' f1 found ++ find_scopes' f2 found
+        FSortComplement f -> find_scopes' f found
+        FSortComputes f -> find_scopes' f found
+        FSortComputesFrom f1 f2 -> find_scopes' f1 found ++ find_scopes' f2 found
+        _              -> found
+        
+    find_scopes_vals :: [Funcons] -> Funcons.Types.Values -> [Funcons]
+    find_scopes_vals found term= case term of
+        (ADTVal _ l) -> foldr find_scopes' found l
+        _          -> found
+
+      
+-- swap_main = swap $ fct_parse "apply(assigned(bound(\"main\")),tuple( ))"
 
 
 
@@ -429,24 +490,177 @@ swap_main = swap $ fct_parse "apply(assigned(bound(\"main\")),tuple( ))"
 --             putStrLn $ show (convert $ head e)
 --             return True
 
+-- used for debugging 
+-- instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
+--     estatem :: Funcons -> DebugConfig -> IO Bool
+--     estatem break dc@(DFunconsConfig config _ _  opts) = do
+--       printDFunconsConfig opts dc
+--       putStrLn $ show $ mut_entities $ state config
+--       let inh = inh_entities $ reader config
+--       putStrLn $ show inh
+--       case M.lookup "environment" inh of 
+--         Nothing -> return False
+--         (Just e) -> case M.null (convert $ head e) of 
+--           True -> return False 
+--           _ -> do 
+--             putStrLn $ show (convert $ head e)
+--             return True
 
+scope_target (FApp v x) = head $ reverse x
+
+strore_not_empty ::  M.Map Name [Funcons.EDSL.Values] -> IO Bool
+strore_not_empty mut = case M.lookup "store" mut of 
+  Nothing -> return $ False 
+  (Just x) -> do 
+    putStrLn $ show $ convert ( head x)
+    putStrLn $ show $ M.null $ convert ( head x)
+    return $ not$ M.null $ convert ( head x)
+    --  M.null $ x   
+
+estatemtest :: Funcons -> DebugConfig -> IO Bool
+estatemtest break dc@(DFunconsConfig config _ _  opts _) = do
+  case progress config of 
+    (Left f) -> do
+
+      let p = head $ reverse  $ find_scopes f
+
+      
+      let s = convert $ head $ fromJust $ M.lookup "store" $   mut_entities $ state config
+
+      let rest =  M.delete "store" $ mut_entities $ state config
+
+      let functions = filter (\(k,v) -> and $ map isFunction v) (M.toList s)
+      case null functions of
+        True -> return False
+        _ -> do 
+          let (_, (funcons_values_main)) = head functions
+              -- We assume funcons_values_main to be a singleton
+              (ADTVal name funcons) = head $ funcons_values_main
+              -- scope = head $ find_scopes $ head funcons
+          case null funcons of 
+            False -> case null $ find_scopes $ head funcons of
+              False -> do
+                -- putStrLn $ show $ head funcons
+                let scope = head $ reverse $  find_scopes $ head funcons
+                    (FApp "scope" internal) = scope
+                    -- now we swap in the breakpoint
+                    new_scope = (FApp "scope" (init internal ++ [break]))
+
+                (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes new_scope)) (reader config) ( state config)
+        
+                return $ isTrue $ fmap (\x -> map frombool x) $ fromRight $ e_exc_f
+
+              True -> return False
+            True -> return False
+
+    _ -> 
+
+        return False
+
+  
+  where 
+    isFunction (ADTVal "function" _) = True
+    isFunction _ = False
+
+    fromRight( Right(Right x )) = Just x
+    fromRight _ = Nothing
+
+    isTrue(Just [Just True]) = True
+    isTrue _ = False
+
+-- extract scopes 
 instance MVD.Evaluatem Funcons DebugConfig (Bool) where 
     estatem :: Funcons -> DebugConfig -> IO Bool
-    estatem break dc@(DFunconsConfig config _ _  opts) = do
-      printDFunconsConfig opts dc
-      putStrLn $ show $ mut_entities $ state config
-      let inh = inh_entities $ reader config
-      putStrLn $ show inh
-      case M.lookup "environment" inh of 
-        Nothing -> return False
-        (Just e) -> case M.null (convert $ head e) of 
-          True -> return False 
-          _ -> do 
-            putStrLn $ show (convert $ head e)
-            return True
+    estatem break dc@(DFunconsConfig config _ _  opts _) = do
+      -- putStrLn $ show $ progress config
+      case progress config of 
+        (Left f) -> do
+          -- putStrLn "scopes"
+          
+          -- putStrLn $ show $ find_scopes f
+          -- putStrLn $ show $ "size" ++ (show $ length $ find_scopes f)
+          let p = head $ reverse  $ find_scopes f
+          -- putStrLn $ show p
+          -- putStrLn $ "target"
+          -- putStrLn $ show $ scope_target p
+          -- putStrLn $ "mu"
+          -- putStrLn $ show $ mut_entities $ state config
+          -- putStrLn $ "store: "
+          
+          let s = convert $ head $ fromJust $ M.lookup "store" $   mut_entities $ state config
+          -- forM_  (M.toList s) (\(key, val) -> do 
+          --     putStrLn $ "key:" ++ show key
+          --     putStrLn $ showValuesSeq val
+          --     putStrLn $ show $ map isFunction val
+          --   )
+          let rest =  M.delete "store" $ mut_entities $ state config
+          putStrLn $ show $ M.map showValuesSeq rest
+
+          -- putStrLn "tessssssssssssss"
+
+          -- putStrLn $  show f
+          -- TODO
+          -- Here we want to find the atom to which the main function is bound. This atom is mapped to a function that has a scope that contains the bindings between variables names and atoms, that we want to target with these breakpoints.
+          -- For now we just assume there is only one function.
+
+          let functions = filter (\(k,v) -> and $ map isFunction v) (M.toList s)
+          case null functions of
+            True -> return False
+            _ -> do 
+              let (_, (funcons_values_main)) = head functions
+                  -- We assume funcons_values_main to be a singleton
+                  (ADTVal name funcons) = head $ funcons_values_main
+                  -- scope = head $ find_scopes $ head funcons
+              case null funcons of 
+                False -> case null $ find_scopes $ head funcons of
+                  False -> do
+                    -- putStrLn $ show $ head funcons
+                    putStrLn $ "last scope"
+                    let scope = head $ reverse $  find_scopes $ head funcons
+                        (FApp "scope" internal) = scope
+                        -- now we swap in the breakpoint
+                        new_scope = (FApp "scope" (init internal ++ [break]))
+
+                    (e_exc_f, mut, wr) <- runMSOS (stepTrans opts 0 (toStepRes new_scope)) (reader config) ( state config)
+                    let ret = isTrue $ fmap (\x -> map frombool x) $ fromRight $ e_exc_f
+                    putStrLn $ "ret" ++  (show $ ret)
+                    b <- estatemtest break dc
+                    putStrLn $ "Return val:" ++ show b
+                    return $ ret
+                    -- return True
+
+                  True -> return False
+                True -> return False
 
 
-    
+        _ -> 
+            -- do
+            -- putStrLn "" 
+            return False
+      -- strore_not_empty (mut_entities $ state config)
+      -- return False
+      
+      where 
+        isFunction (ADTVal "function" _) = True
+        isFunction _ = False
+
+        fromRight( Right(Right x )) = Just x
+        fromRight _ = Nothing
+
+        isTrue(Just [Just True]) = True
+        isTrue _ = False
+      -- printDFunconsConfig opts dc
+      -- putStrLn $ show $ mut_entities $ state config
+      -- let inh = inh_entities $ reader config
+      -- putStrLn $ show inh
+      -- case M.lookup "environment" inh of 
+      --   Nothing -> return False
+      --   (Just e) -> case M.null (convert $ head e) of 
+      --     True -> return False 
+      --     _ -> do 
+      --       putStrLn $ show (convert $ head e)
+      --       return True
+    -- where remov 
 
 -- repl :: IO ()
 -- repl = getArgs >>= mk_interpreter >>= (runInputT defaultSettings . buildDebugger)
@@ -504,18 +718,22 @@ showFunconsActions opts (NDChoice i (NDInputPattern k)) =
   concatMap toStr k
   where toStr (k, r) = "variable #" ++ show (k+1) ++ " matching " ++ show r ++ " values"
 
-data DFunconsConfig = DFunconsConfig { nconfig :: Config, ndeter :: Maybe (Funcons, NDInput), ndchoice :: [Int], opts :: RunOptions }
+data DFunconsConfig = DFunconsConfig { nconfig :: Config, ndeter :: Maybe (Funcons, NDInput), ndchoice :: [Int], opts :: RunOptions, count :: Int }
 
 printDFunconsConfig :: RunOptions -> DFunconsConfig -> IO ()
 printDFunconsConfig opts c 
   | isJust (ndeter c) = do
     putStr "Current term: "
     putStrLn $ showProgress opts (progress $ nconfig c)
-    -- $ show $ c
+    -- putStrLn $ show $ mut_entities $ state $ nconfig c
+    -- putStrLn $ show $ inh_entities $ reader $ nconfig c
+
     putStrLn $ "Non-determinism choice at: " ++ ppFuncons opts (fst . fromJust . ndeter $ c)
   | otherwise =  do
     putStr "Current term: "
     putStrLn $ showProgress opts (progress $ nconfig c)
+    -- putStrLn $ show $ mut_entities $ state $ nconfig c
+    -- putStrLn $ show $ inh_entities $ reader $ nconfig c
     -- show $ c
     
     -- showProgress opts (progress $ nconfig c)
@@ -562,18 +780,20 @@ debugExecute opts dcfg = do
               -- putStrLn ""
 
               -- putStrLn $ show $ mut_entities mut
+              -- putStrLn $ show $ inh_entities msos_ctxt
+
               -- putStrLn ""
-              return [dcfg {ndeter = Just (local, ndsrc), nconfig = nconfig dcfg } ]
+              return [dcfg {ndeter = Just (local, ndsrc), nconfig = (nconfig dcfg){state = mut} , count = 1 + count dcfg} ]
             Left ie    -> putStrLn (showIException ie) >> return []
             Right (Left fct) -> do 
-              return $ [dcfg { nconfig = cfg { state = mut, progress = Left fct}}] -- did not yield an environment
+              return $ [dcfg { nconfig = cfg { state = mut, progress = Left fct}, count = 1 + count dcfg}] -- did not yield an environment
             Right (Right efvs) -> case filter isMap efvs of
               []    -> do
-                return $ [dcfg { nconfig = cfg { state = mut, progress = Right efvs } }]
+                return $ [dcfg { nconfig = cfg { state = mut, progress = Right efvs } , count = 1 + count dcfg}]
               [env] -> do
                 -- print env
                 
-                return $ [dcfg { nconfig = cfg { reader = accumulate (reader cfg) env, state = mut, progress = Right efvs } } ]
+                return $ [dcfg { nconfig = cfg { reader = accumulate (reader cfg) env, state = mut, progress = Right efvs } , count = 1 + count dcfg} ]
               _     -> return [] 
           where accumulate msos_reader env = msos_reader { inh_entities = M.update override "environment" (inh_entities msos_reader) }
                   where override [old_env] = case (env, old_env) of 
@@ -597,7 +817,7 @@ debugExecute' interp c p =
 
 funconsSTR :: RunOptions -> (DFunconsConfig -> IO [DFunconsConfig]) -> Config -> MVD.STR DFunconsConfig FunconsActions
 funconsSTR ropts interp c = MVD.STR 
-  { MVD.initial = [DFunconsConfig { nconfig = c, ndeter = Nothing, ndchoice = [], opts = ropts }]
+  { MVD.initial = [DFunconsConfig { nconfig = c, ndeter = Nothing, ndchoice = [], opts = ropts , count = 0}]
   , MVD.actions = debugActions
   , MVD.execute = debugExecute' interp
   }
